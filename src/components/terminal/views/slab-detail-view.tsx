@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useNavigation } from "@/hooks/use-navigation"
 import { useSlabDetail, type SlabDetail, type SlabPosition, type SlabLP } from "@/hooks/use-slab-detail"
 import { TerminalPanel } from "../terminal-panel"
+import { MarketVisual } from "../market-visual"
 import { ExplorerLink, truncateAddress } from "../explorer-link"
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -455,6 +456,11 @@ export function SlabDetailView() {
           ERROR: {error.message}
         </div>
       )}
+
+      {/* Market visualization */}
+      <TerminalPanel title="Market Visual">
+        <MarketVisual data={data} />
+      </TerminalPanel>
 
       {/* Market overview + config */}
       <div className="grid grid-cols-1 gap-px lg:grid-cols-2">

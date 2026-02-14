@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSlabMarketData } from '@/lib/fetcher';
+import { recordPricePoint } from '@/lib/price-history';
 import type { NetworkId } from '@/lib/registry';
 
 /**
@@ -36,6 +37,17 @@ export async function GET(
       programId,
       network,
     });
+
+    // Record price snapshot for chart history
+    if (detail.solUsdPrice > 0) {
+      recordPricePoint(address, {
+        t: detail.timestamp,
+        p: detail.solUsdPrice,
+        tvl: detail.vaultBalanceSol,
+        oi: detail.openInterestSol,
+        fr: detail.fundingRate.rateBpsPerHour,
+      });
+    }
 
     return NextResponse.json(detail, {
       headers: {
