@@ -166,11 +166,11 @@ function PositionMapSVG({
     <svg
       ref={svgRef}
       viewBox={`0 0 ${chartW} ${MAP_HEIGHT}`}
-      preserveAspectRatio="none"
-      className="w-full h-full"
+      preserveAspectRatio="xMidYMid meet"
+      className="w-full"
       onMouseMove={handleMouseMove}
       onMouseLeave={() => setHover(null)}
-      style={{ cursor: traders.length > 0 ? "crosshair" : "default" }}
+      style={{ cursor: traders.length > 0 ? "crosshair" : "default", height: MAP_HEIGHT }}
     >
       {/* Y-axis grid (size) */}
       {yTicks.map((tick) => {
@@ -331,7 +331,7 @@ function DepthBarSVG({ data }: { data: SlabDetail }) {
   const barH = 28
 
   return (
-    <svg viewBox={`0 0 ${chartW} ${totalH}`} preserveAspectRatio="none" className="w-full h-full">
+    <svg viewBox={`0 0 ${chartW} ${totalH}`} preserveAspectRatio="xMidYMid meet" className="w-full" style={{ height: totalH }}>
       {/* Long/Short bar section */}
       <text x={4} y={12} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">LONG / SHORT BALANCE</text>
 
@@ -538,7 +538,6 @@ export function MarketVisual({ data }: { data: SlabDetail }) {
       {/* Chart area */}
       <div
         className="relative w-full border border-[var(--terminal-border)] bg-[var(--terminal-bg)]"
-        style={{ height: view === "health" ? "auto" : view === "depth" ? 130 : MAP_HEIGHT }}
       >
         {view === "positions" && (
           <PositionMapSVG data={data} positions={data.positions} />
