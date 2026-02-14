@@ -38,12 +38,9 @@ function healthBar(health: number): { color: string; label: string } {
 }
 
 function programShort(name: string): string {
-  if (name.toLowerCase().includes("toly")) return "toly"
-  if (name.toLowerCase().includes("small")) return "launch-s"
-  if (name.toLowerCase().includes("medium")) return "launch-m"
-  if (name.toLowerCase().includes("large")) return "launch-l"
-  if (name.toLowerCase().includes("sov")) return "SOV"
-  return name.slice(0, 8)
+  // Labels are already short — just return as-is
+  // "Toly OG", "Launch 240", "Launch 960", "Launch 4096", "SOV"
+  return name
 }
 
 function oracleBadge(mode: OracleMode): { label: string; color: string } {

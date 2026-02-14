@@ -6,7 +6,7 @@ import type { SlabDetail, SlabPosition } from "@/hooks/use-slab-detail"
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MAP_HEIGHT = 180
-const PADDING = { top: 12, right: 56, bottom: 22, left: 4 }
+const PADDING = { top: 14, right: 60, bottom: 24, left: 6 }
 
 const COLOR_GREEN = "#00ff41"
 const COLOR_RED = "#ff0040"
@@ -24,7 +24,8 @@ function niceAxisValues(min: number, max: number, steps: number): number[] {
   if (min === max) return [min - 1, min, min + 1]
   const range = max - min
   const rawStep = range / steps
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
+  if (rawStep === 0) return [min]
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.abs(rawStep))))
   const residual = rawStep / magnitude
   let niceStep: number
   if (residual <= 1.5) niceStep = magnitude
@@ -43,13 +44,26 @@ function healthColor(h: number): string {
   return COLOR_RED
 }
 
+/** Format price smartly based on magnitude */
+function fmtPrice(v: number): string {
+  if (v >= 10000) return `$${v.toFixed(0)}`
+  if (v >= 100) return `$${v.toFixed(1)}`
+  if (v >= 1) return `$${v.toFixed(2)}`
+  if (v >= 0.01) return `$${v.toFixed(4)}`
+  return `$${v.toExponential(1)}`
+}
+
+/** Format SOL amounts */
+function fmtSol(v: number): string {
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}K`
+  if (v >= 1) return v.toFixed(2)
+  if (v >= 0.001) return v.toFixed(4)
+  return v.toFixed(6)
+}
+
 type ViewMode = "positions" | "depth" | "health"
 
 // ── Position Map ───────────────────────────────────────────────────────────
-// Scatter: X = entry price, Y = position size
-// Longs = green circles, Shorts = red circles
-// Mark price = vertical dashed line
-// Liquidation prices = small triangles
 
 function PositionMapSVG({
   data,
@@ -74,11 +88,13 @@ function PositionMapSVG({
   // Compute axes
   const { xMin, xMax, xTicks, yMax, yTicks } = useMemo(() => {
     if (traders.length === 0) {
+      // Empty market — show range around mark price
       const markP = data.solUsdPrice || 100
+      const spread = Math.max(markP * 0.1, 1)
       return {
-        xMin: markP * 0.95,
-        xMax: markP * 1.05,
-        xTicks: niceAxisValues(markP * 0.95, markP * 1.05, 4),
+        xMin: markP - spread,
+        xMax: markP + spread,
+        xTicks: niceAxisValues(markP - spread, markP + spread, 4),
         yMax: 1,
         yTicks: [0, 0.5, 1],
       }
@@ -93,10 +109,10 @@ function PositionMapSVG({
     let pMin = Math.min(...allPrices)
     let pMax = Math.max(...allPrices)
     if (pMin === pMax) {
-      pMin -= Math.abs(pMin * 0.02) || 1
-      pMax += Math.abs(pMax * 0.02) || 1
+      pMin -= Math.abs(pMin * 0.05) || 1
+      pMax += Math.abs(pMax * 0.05) || 1
     }
-    const pPad = (pMax - pMin) * 0.08
+    const pPad = (pMax - pMin) * 0.1
     pMin -= pPad
     pMax += pPad
 
@@ -104,9 +120,9 @@ function PositionMapSVG({
     const sizes = traders.map((p) => Math.abs(p.size))
     let sMax = Math.max(...sizes)
     if (sMax === 0) sMax = 1
-    sMax *= 1.15 // top padding
+    sMax *= 1.15
 
-    const xt = niceAxisValues(pMin, pMax, 5)
+    const xt = niceAxisValues(pMin, pMax, 4)
     const yt = niceAxisValues(0, sMax, 3)
 
     return {
@@ -123,7 +139,6 @@ function PositionMapSVG({
 
   const markPriceX = data.solUsdPrice > 0 ? xScale(data.solUsdPrice) : null
 
-  // Hover handler
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
       if (traders.length === 0 || !svgRef.current) return
@@ -131,9 +146,8 @@ function PositionMapSVG({
       const mx = ((e.clientX - rect.left) / rect.width) * chartW
       const my = ((e.clientY - rect.top) / rect.height) * MAP_HEIGHT
 
-      // Find closest trader
       let closest = -1
-      let bestDist = 20 // pixel threshold
+      let bestDist = 25
       for (let i = 0; i < traders.length; i++) {
         const px = xScale(traders[i].entryPrice)
         const py = yScale(Math.abs(traders[i].size))
@@ -158,68 +172,66 @@ function PositionMapSVG({
       onMouseLeave={() => setHover(null)}
       style={{ cursor: traders.length > 0 ? "crosshair" : "default" }}
     >
-      {/* Grid lines (horizontal - size) */}
+      {/* Y-axis grid (size) */}
       {yTicks.map((tick) => {
         const y = yScale(tick)
         return (
           <g key={`y-${tick}`}>
             <line x1={PADDING.left} x2={PADDING.left + innerW} y1={y} y2={y} stroke={COLOR_GRID} strokeDasharray="2 3" strokeWidth={0.5} />
             <text x={PADDING.left + innerW + 4} y={y + 3} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">
-              {tick < 1 ? tick.toFixed(2) : tick.toFixed(1)}
+              {fmtSol(tick)}
             </text>
           </g>
         )
       })}
 
-      {/* Grid lines (vertical - price) */}
-      {xTicks.map((tick) => {
+      {/* X-axis grid (price) */}
+      {xTicks.map((tick, i) => {
         const x = xScale(tick)
+        // Skip ticks too close to edges
+        if (x < PADDING.left + 10 || x > PADDING.left + innerW - 10) return null
         return (
-          <g key={`x-${tick}`}>
+          <g key={`x-${i}`}>
             <line x1={x} x2={x} y1={PADDING.top} y2={PADDING.top + innerH} stroke={COLOR_GRID} strokeDasharray="2 3" strokeWidth={0.5} />
-            <text x={x} y={MAP_HEIGHT - 3} fill={COLOR_DIM} fontSize={7} fontFamily="monospace" textAnchor="middle">
-              ${tick.toFixed(0)}
+            <text x={x} y={MAP_HEIGHT - 4} fill={COLOR_DIM} fontSize={7} fontFamily="monospace" textAnchor="middle">
+              {fmtPrice(tick)}
             </text>
           </g>
         )
       })}
 
       {/* Axis labels */}
-      <text x={PADDING.left + innerW + 4} y={PADDING.top - 2} fill={COLOR_DIM} fontSize={6} fontFamily="monospace">
-        SIZE
-      </text>
-      <text x={PADDING.left + innerW / 2} y={MAP_HEIGHT - 12} fill={COLOR_DIM} fontSize={6} fontFamily="monospace" textAnchor="middle">
-        ENTRY PRICE (USD)
+      <text x={PADDING.left + innerW + 4} y={PADDING.top - 3} fill={COLOR_DIM} fontSize={6} fontFamily="monospace">
+        SIZE (SOL)
       </text>
 
       {/* Mark price line */}
-      {markPriceX !== null && (
+      {markPriceX !== null && markPriceX >= PADDING.left && markPriceX <= PADDING.left + innerW && (
         <>
           <line
             x1={markPriceX} x2={markPriceX}
             y1={PADDING.top} y2={PADDING.top + innerH}
             stroke={COLOR_CYAN} strokeWidth={1} strokeDasharray="4 2" opacity={0.7}
           />
-          <text x={markPriceX} y={PADDING.top - 2} fill={COLOR_CYAN} fontSize={7} fontFamily="monospace" fontWeight="bold" textAnchor="middle">
-            MARK ${data.solUsdPrice.toFixed(2)}
+          <text x={markPriceX} y={PADDING.top - 3} fill={COLOR_CYAN} fontSize={7} fontFamily="monospace" fontWeight="bold" textAnchor="middle">
+            MARK {fmtPrice(data.solUsdPrice)}
           </text>
         </>
       )}
 
-      {/* Liquidation price markers (small triangles on the bottom) */}
+      {/* Liquidation price markers */}
       {traders.map((p, i) => {
         if (p.liquidationPrice <= 0) return null
         const lx = xScale(p.liquidationPrice)
-        // Only draw if within visible range
         if (lx < PADDING.left || lx > PADDING.left + innerW) return null
         const baseY = PADDING.top + innerH
         const color = p.side === "long" ? COLOR_GREEN : COLOR_RED
         return (
           <polygon
             key={`liq-${i}`}
-            points={`${lx},${baseY - 4} ${lx - 2},${baseY} ${lx + 2},${baseY}`}
+            points={`${lx},${baseY - 4} ${lx - 2.5},${baseY} ${lx + 2.5},${baseY}`}
             fill={color}
-            opacity={0.3}
+            opacity={0.35}
           />
         )
       })}
@@ -230,14 +242,11 @@ function PositionMapSVG({
         const cy = yScale(Math.abs(p.size))
         const color = p.side === "long" ? COLOR_GREEN : COLOR_RED
         const isHovered = hover === i
-        // Size based on collateral (bigger = more collateral)
         const r = Math.max(3, Math.min(8, Math.sqrt(p.collateral) * 2))
 
         return (
           <g key={`pos-${i}`}>
-            {/* Glow */}
             <circle cx={cx} cy={cy} r={r + 2} fill={color} opacity={isHovered ? 0.3 : 0.08} />
-            {/* Dot */}
             <circle
               cx={cx} cy={cy} r={isHovered ? r + 1 : r}
               fill={color}
@@ -245,7 +254,6 @@ function PositionMapSVG({
               strokeWidth={0.5}
               opacity={isHovered ? 1 : 0.75}
             />
-            {/* Entry-to-liq line */}
             {p.liquidationPrice > 0 && (
               <line
                 x1={cx} y1={cy}
@@ -262,30 +270,24 @@ function PositionMapSVG({
         const p = traders[hover]
         const cx = xScale(p.entryPrice)
         const cy = yScale(Math.abs(p.size))
-        const tooltipW = 120
+        const tooltipW = 130
         const tooltipH = 42
         const tx = cx + tooltipW + 10 > chartW ? cx - tooltipW - 6 : cx + 6
         const ty = Math.max(PADDING.top, Math.min(cy - tooltipH / 2, MAP_HEIGHT - PADDING.bottom - tooltipH))
-        const sideStr = p.side.toUpperCase()
-        const sideColor = p.side === "long" ? COLOR_GREEN : COLOR_RED
+        const sColor = p.side === "long" ? COLOR_GREEN : COLOR_RED
 
         return (
           <>
-            {/* Crosshair */}
             <line x1={cx} x2={cx} y1={PADDING.top} y2={PADDING.top + innerH} stroke={COLOR_CROSSHAIR} strokeWidth={0.5} strokeDasharray="2 2" />
             <line x1={PADDING.left} x2={PADDING.left + innerW} y1={cy} y2={cy} stroke={COLOR_CROSSHAIR} strokeWidth={0.5} strokeDasharray="2 2" />
 
-            {/* Tooltip bg */}
             <rect x={tx} y={ty} width={tooltipW} height={tooltipH} rx={1} fill="#0d1117" stroke={COLOR_BORDER} strokeWidth={0.5} />
-            {/* Side + size */}
-            <text x={tx + 4} y={ty + 11} fill={sideColor} fontSize={8} fontFamily="monospace" fontWeight="bold">
-              {sideStr} {Math.abs(p.size).toFixed(2)} SOL
+            <text x={tx + 4} y={ty + 11} fill={sColor} fontSize={8} fontFamily="monospace" fontWeight="bold">
+              {p.side.toUpperCase()} {fmtSol(Math.abs(p.size))} SOL
             </text>
-            {/* Entry price */}
             <text x={tx + 4} y={ty + 22} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">
-              Entry: ${p.entryPrice.toFixed(2)}  Liq: ${p.liquidationPrice > 0 ? `$${p.liquidationPrice.toFixed(2)}` : "N/A"}
+              Entry: {fmtPrice(p.entryPrice)}  Liq: {p.liquidationPrice > 0 ? fmtPrice(p.liquidationPrice) : "N/A"}
             </text>
-            {/* PnL + Health */}
             <text x={tx + 4} y={ty + 33} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">
               PnL: <tspan fill={p.unrealizedPnl >= 0 ? COLOR_GREEN : COLOR_RED}>
                 {p.unrealizedPnl >= 0 ? "+" : ""}{p.unrealizedPnl.toFixed(4)}
@@ -298,8 +300,8 @@ function PositionMapSVG({
 
       {/* Empty state */}
       {traders.length === 0 && (
-        <text x={chartW / 2} y={MAP_HEIGHT / 2} fill={COLOR_DIM} fontSize={10} fontFamily="monospace" textAnchor="middle">
-          NO ACTIVE TRADER POSITIONS
+        <text x={chartW / 2} y={MAP_HEIGHT / 2 + 4} fill={COLOR_DIM} fontSize={10} fontFamily="monospace" textAnchor="middle">
+          NO OPEN TRADER POSITIONS
         </text>
       )}
     </svg>
@@ -307,123 +309,115 @@ function PositionMapSVG({
 }
 
 // ── Market Depth Bar ───────────────────────────────────────────────────────
-// Horizontal stacked bar: longs vs shorts
 
 function DepthBarSVG({ data }: { data: SlabDetail }) {
   const chartW = 600
-  const barH = 28
-  const totalH = 120
+  const totalH = 130
 
   const longSize = data.summary.totalLongNotional
   const shortSize = data.summary.totalShortNotional
   const total = longSize + shortSize
-  const longPct = total > 0 ? longSize / total : 0.5
-  const shortPct = total > 0 ? shortSize / total : 0.5
+  const hasPositions = total > 0
+  const longPct = hasPositions ? longSize / total : 0
+  const shortPct = hasPositions ? shortSize / total : 0
 
   const insuranceSol = data.insuranceFundSol
   const tvlSol = data.vaultBalanceSol
   const oiSol = data.openInterestSol
-  const insuranceRatio = oiSol > 0 ? insuranceSol / oiSol : 0
+  const insuranceRatio = oiSol > 0 ? insuranceSol / oiSol : tvlSol > 0 ? 1 : 0
   const utilizationPct = data.maxAccountCapacity > 0 ? (data.engine.numUsedAccounts / data.maxAccountCapacity) * 100 : 0
+
+  const barW = chartW - 70
+  const barH = 28
 
   return (
     <svg viewBox={`0 0 ${chartW} ${totalH}`} preserveAspectRatio="none" className="w-full h-full">
-      {/* Long/Short bar */}
+      {/* Long/Short bar section */}
       <text x={4} y={12} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">LONG / SHORT BALANCE</text>
 
       {/* Bar background */}
-      <rect x={4} y={18} width={chartW - 60} height={barH} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
+      <rect x={4} y={18} width={barW} height={barH} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
 
-      {/* Long side */}
-      <rect x={4} y={18} width={Math.max(1, (chartW - 60) * longPct)} height={barH} rx={1} fill={COLOR_GREEN} opacity={0.6} />
-
-      {/* Short side */}
-      <rect
-        x={4 + (chartW - 60) * longPct}
-        y={18}
-        width={Math.max(1, (chartW - 60) * shortPct)}
-        height={barH}
-        rx={1}
-        fill={COLOR_RED}
-        opacity={0.6}
-      />
-
-      {/* Center divider */}
-      {total > 0 && (
-        <line
-          x1={4 + (chartW - 60) * longPct}
-          x2={4 + (chartW - 60) * longPct}
-          y1={16}
-          y2={48}
-          stroke="#fff"
-          strokeWidth={0.5}
-          opacity={0.4}
-        />
+      {hasPositions ? (
+        <>
+          <rect x={4} y={18} width={Math.max(1, barW * longPct)} height={barH} rx={1} fill={COLOR_GREEN} opacity={0.5} />
+          <rect x={4 + barW * longPct} y={18} width={Math.max(1, barW * shortPct)} height={barH} rx={1} fill={COLOR_RED} opacity={0.5} />
+          <line x1={4 + barW * longPct} x2={4 + barW * longPct} y1={16} y2={48} stroke="#fff" strokeWidth={0.5} opacity={0.4} />
+          <text x={10} y={36} fill={COLOR_GREEN} fontSize={9} fontFamily="monospace" fontWeight="bold">
+            LONG {(longPct * 100).toFixed(0)}%
+          </text>
+          <text x={barW} y={36} fill={COLOR_RED} fontSize={9} fontFamily="monospace" fontWeight="bold" textAnchor="end">
+            {(shortPct * 100).toFixed(0)}% SHORT
+          </text>
+          <text x={barW + 8} y={26} fill={COLOR_GREEN} fontSize={7} fontFamily="monospace">{fmtSol(longSize)}</text>
+          <text x={barW + 8} y={38} fill={COLOR_RED} fontSize={7} fontFamily="monospace">{fmtSol(shortSize)}</text>
+          <text x={barW + 8} y={48} fill={COLOR_DIM} fontSize={6} fontFamily="monospace">SOL</text>
+        </>
+      ) : (
+        <text x={4 + barW / 2} y={36} fill={COLOR_DIM} fontSize={9} fontFamily="monospace" textAnchor="middle">
+          NO OPEN POSITIONS
+        </text>
       )}
 
-      {/* Labels */}
-      <text x={10} y={36} fill={COLOR_GREEN} fontSize={9} fontFamily="monospace" fontWeight="bold">
-        LONG {(longPct * 100).toFixed(0)}%
-      </text>
-      <text x={chartW - 60} y={36} fill={COLOR_RED} fontSize={9} fontFamily="monospace" fontWeight="bold" textAnchor="end">
-        {(shortPct * 100).toFixed(0)}% SHORT
-      </text>
-
-      {/* Size labels to the right */}
-      <text x={chartW - 52} y={26} fill={COLOR_GREEN} fontSize={7} fontFamily="monospace">
-        {longSize.toFixed(1)}
-      </text>
-      <text x={chartW - 52} y={38} fill={COLOR_RED} fontSize={7} fontFamily="monospace">
-        {shortSize.toFixed(1)}
-      </text>
-      <text x={chartW - 52} y={48} fill={COLOR_DIM} fontSize={6} fontFamily="monospace">SOL</text>
-
-      {/* Metrics row */}
+      {/* Metrics section */}
       <text x={4} y={66} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">MARKET METRICS</text>
 
       {/* TVL bar */}
       <text x={4} y={80} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">TVL</text>
       <rect x={40} y={73} width={200} height={10} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={40} y={73} width={200} height={10} rx={1} fill={COLOR_GREEN} opacity={0.4} />
+      <rect x={40} y={73} width={tvlSol > 0 ? 200 : 0} height={10} rx={1} fill={COLOR_GREEN} opacity={0.4} />
       <text x={244} y={82} fill={COLOR_GREEN} fontSize={7} fontFamily="monospace">
-        {tvlSol.toFixed(2)} SOL
+        {fmtSol(tvlSol)} SOL
       </text>
 
-      {/* OI bar */}
+      {/* OI bar — relative to TVL */}
       <text x={4} y={95} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">OI</text>
       <rect x={40} y={88} width={200} height={10} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={40} y={88} width={Math.min(200, tvlSol > 0 ? (oiSol / tvlSol) * 200 : 0)} height={10} rx={1} fill={COLOR_AMBER} opacity={0.5} />
-      <text x={244} y={97} fill={COLOR_AMBER} fontSize={7} fontFamily="monospace">
-        {oiSol.toFixed(2)} SOL
+      <rect x={40} y={88} width={tvlSol > 0 ? Math.min(200, (oiSol / tvlSol) * 200) : 0} height={10} rx={1} fill={COLOR_AMBER} opacity={0.5} />
+      <text x={244} y={97} fill={oiSol > 0 ? COLOR_AMBER : COLOR_DIM} fontSize={7} fontFamily="monospace">
+        {oiSol > 0 ? `${fmtSol(oiSol)} SOL` : "NONE"}
       </text>
 
       {/* Insurance bar */}
       <text x={4} y={110} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">INS</text>
       <rect x={40} y={103} width={200} height={10} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={40} y={103} width={Math.min(200, tvlSol > 0 ? (insuranceSol / tvlSol) * 200 : 0)} height={10} rx={1} fill={COLOR_CYAN} opacity={0.5} />
-      <text x={244} y={112} fill={COLOR_CYAN} fontSize={7} fontFamily="monospace">
-        {insuranceSol.toFixed(4)} SOL ({(insuranceRatio * 100).toFixed(1)}% of OI)
+      <rect x={40} y={103} width={tvlSol > 0 ? Math.min(200, (insuranceSol / tvlSol) * 200) : 0} height={10} rx={1} fill={COLOR_CYAN} opacity={0.5} />
+      <text x={244} y={112} fill={insuranceSol > 0 ? COLOR_CYAN : COLOR_DIM} fontSize={7} fontFamily="monospace">
+        {insuranceSol > 0
+          ? `${fmtSol(insuranceSol)} SOL${oiSol > 0 ? ` (${(insuranceRatio * 100).toFixed(1)}% of OI)` : ""}`
+          : "NONE"}
       </text>
 
-      {/* Utilization on right side */}
+      {/* Utilization gauge — right side */}
       <text x={380} y={80} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">UTILIZATION</text>
       <rect x={380} y={88} width={160} height={18} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={380} y={88} width={Math.min(160, utilizationPct * 1.6)} height={18} rx={1} fill={utilizationPct > 80 ? COLOR_RED : utilizationPct > 50 ? COLOR_AMBER : COLOR_GREEN} opacity={0.4} />
+      <rect
+        x={380} y={88}
+        width={Math.min(160, utilizationPct * 1.6)}
+        height={18} rx={1}
+        fill={utilizationPct > 100 ? COLOR_RED : utilizationPct > 80 ? COLOR_AMBER : COLOR_GREEN}
+        opacity={0.4}
+      />
       <text x={460} y={101} fill="#fff" fontSize={9} fontFamily="monospace" fontWeight="bold" textAnchor="middle">
-        {data.engine.numUsedAccounts} / {data.maxAccountCapacity} ({utilizationPct.toFixed(0)}%)
+        {data.engine.numUsedAccounts} / {data.maxAccountCapacity} ({Math.round(utilizationPct)}%)
       </text>
+
+      {/* Warning for >100% utilization */}
+      {utilizationPct > 100 && (
+        <text x={460} y={122} fill={COLOR_RED} fontSize={7} fontFamily="monospace" textAnchor="middle">
+          OVER CAPACITY
+        </text>
+      )}
     </svg>
   )
 }
 
 // ── Health Heatmap ─────────────────────────────────────────────────────────
-// Grid of cells, one per account, colored by margin health
 
 function HealthHeatmapSVG({ positions }: { positions: SlabPosition[] }) {
   const chartW = 600
-  const totalH = 140
 
-  // Only active positions (not flat)
+  // Active = non-flat traders + all LPs
   const active = useMemo(
     () => positions.filter((p) => p.side !== "flat" || p.isLP).sort((a, b) => a.marginHealth - b.marginHealth),
     [positions],
@@ -431,7 +425,7 @@ function HealthHeatmapSVG({ positions }: { positions: SlabPosition[] }) {
 
   if (active.length === 0) {
     return (
-      <svg viewBox={`0 0 ${chartW} 40`} preserveAspectRatio="none" className="w-full" style={{ height: 40 }}>
+      <svg viewBox={`0 0 ${chartW} 40`} preserveAspectRatio="xMidYMid meet" className="w-full" style={{ height: 40 }}>
         <text x={chartW / 2} y={24} fill={COLOR_DIM} fontSize={10} fontFamily="monospace" textAnchor="middle">
           NO ACTIVE POSITIONS
         </text>
@@ -439,20 +433,19 @@ function HealthHeatmapSVG({ positions }: { positions: SlabPosition[] }) {
     )
   }
 
-  // Compute grid dimensions
-  const cols = Math.ceil(Math.sqrt(active.length * (chartW / totalH)))
+  const maxH = 140
+  const cols = Math.ceil(Math.sqrt(active.length * (chartW / maxH)))
   const rows = Math.ceil(active.length / cols)
   const cellW = (chartW - 8) / cols
-  const cellH = Math.min(14, (totalH - 30) / rows)
+  const cellH = Math.min(16, (maxH - 30) / rows)
   const actualH = 24 + rows * cellH + 4
 
-  // Distribution stats
   const safe = active.filter((p) => p.status === "safe").length
   const atRisk = active.filter((p) => p.status === "at_risk").length
   const liquidatable = active.filter((p) => p.status === "liquidatable").length
 
   return (
-    <svg viewBox={`0 0 ${chartW} ${actualH}`} preserveAspectRatio="none" className="w-full" style={{ height: Math.max(60, actualH) }}>
+    <svg viewBox={`0 0 ${chartW} ${actualH}`} preserveAspectRatio="xMidYMid meet" className="w-full" style={{ height: Math.max(60, actualH) }}>
       {/* Header stats */}
       <text x={4} y={11} fill={COLOR_GREEN} fontSize={8} fontFamily="monospace" fontWeight="bold">
         SAFE: {safe}
@@ -479,32 +472,21 @@ function HealthHeatmapSVG({ positions }: { positions: SlabPosition[] }) {
         const x = 4 + col * cellW
         const y = 20 + row * cellH
         const color = healthColor(p.marginHealth)
-        // Opacity based on health (lower health = more opaque/urgent)
         const opacity = p.marginHealth < 40 ? 0.9 : p.marginHealth < 80 ? 0.6 : 0.4
 
         return (
           <g key={`cell-${i}`}>
             <rect
-              x={x + 0.5}
-              y={y + 0.5}
-              width={cellW - 1}
-              height={cellH - 1}
-              rx={1}
-              fill={color}
-              opacity={opacity}
-              stroke={COLOR_BG}
-              strokeWidth={0.5}
+              x={x + 0.5} y={y + 0.5}
+              width={cellW - 1} height={cellH - 1}
+              rx={1} fill={color} opacity={opacity}
+              stroke={COLOR_BG} strokeWidth={0.5}
             />
-            {/* Show health number if cells are big enough */}
-            {cellW > 16 && cellH > 9 && (
+            {cellW > 16 && cellH > 10 && (
               <text
-                x={x + cellW / 2}
-                y={y + cellH / 2 + 3}
-                fill="#000"
-                fontSize={Math.min(7, cellH - 3)}
-                fontFamily="monospace"
-                fontWeight="bold"
-                textAnchor="middle"
+                x={x + cellW / 2} y={y + cellH / 2 + 3}
+                fill="#000" fontSize={Math.min(7, cellH - 4)}
+                fontFamily="monospace" fontWeight="bold" textAnchor="middle"
               >
                 {p.marginHealth}
               </text>
@@ -519,7 +501,9 @@ function HealthHeatmapSVG({ positions }: { positions: SlabPosition[] }) {
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export function MarketVisual({ data }: { data: SlabDetail }) {
-  const [view, setView] = useState<ViewMode>("positions")
+  // Default to depth view — most useful at a glance, works even for empty markets
+  const hasTraders = data.positions.some((p) => !p.isLP && p.side !== "flat" && p.entryPrice > 0)
+  const [view, setView] = useState<ViewMode>(hasTraders ? "positions" : "depth")
 
   const views: { key: ViewMode; label: string }[] = [
     { key: "positions", label: "POSITIONS" },
@@ -554,7 +538,7 @@ export function MarketVisual({ data }: { data: SlabDetail }) {
       {/* Chart area */}
       <div
         className="relative w-full border border-[var(--terminal-border)] bg-[var(--terminal-bg)]"
-        style={{ height: view === "health" ? "auto" : view === "depth" ? 120 : MAP_HEIGHT }}
+        style={{ height: view === "health" ? "auto" : view === "depth" ? 130 : MAP_HEIGHT }}
       >
         {view === "positions" && (
           <PositionMapSVG data={data} positions={data.positions} />
