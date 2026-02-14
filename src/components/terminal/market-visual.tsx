@@ -425,12 +425,17 @@ function MetricBar({ label, value, max, color, text }: {
 // The parent (slab-detail-view) lays these out in a 2-column grid
 
 export function PositionMapPanel({ data }: { data: SlabDetail }) {
+  const traderCount = data.summary.totalLongs + data.summary.totalShorts
   return (
     <div className="border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
       <div className="px-1.5 py-0.5 border-b border-[var(--terminal-border)] flex items-center justify-between">
         <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--terminal-green)]">Positions</span>
         <span className="text-[8px] text-[var(--terminal-dim)]">
-          {data.positions.filter((p) => !p.isLP && p.side !== "flat" && p.entryPrice > 0).length} traders
+          {traderCount > 0
+            ? `${data.summary.totalLongs}L / ${data.summary.totalShorts}S`
+            : "no traders"
+          }
+          {data.summary.totalLPs > 0 && ` · ${data.summary.totalLPs} LP`}
         </span>
       </div>
       <PositionMapSVG data={data} positions={data.positions} />
@@ -439,12 +444,13 @@ export function PositionMapPanel({ data }: { data: SlabDetail }) {
 }
 
 export function DepthMetricsPanel({ data }: { data: SlabDetail }) {
+  const traderCount = data.summary.totalLongs + data.summary.totalShorts
   return (
     <div className="border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
       <div className="px-1.5 py-0.5 border-b border-[var(--terminal-border)] flex items-center justify-between">
         <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--terminal-green)]">Depth</span>
         <span className="text-[8px] text-[var(--terminal-dim)]">
-          {data.summary.totalPositions} positions
+          {traderCount} active / {data.summary.totalPositions} slots
         </span>
       </div>
       <DepthPanel data={data} />

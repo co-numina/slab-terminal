@@ -457,10 +457,8 @@ export function SlabDetailView() {
         </div>
       )}
 
-      {/* Market visualization */}
-      <TerminalPanel title="Market Visual">
-        <MarketVisual data={data} />
-      </TerminalPanel>
+      {/* Market visualization — 2-column: positions + depth */}
+      <MarketVisual data={data} />
 
       {/* Market overview + config */}
       <div className="grid grid-cols-1 gap-px lg:grid-cols-2">
