@@ -61,8 +61,6 @@ function fmtSol(v: number): string {
   return v.toFixed(6)
 }
 
-type ViewMode = "positions" | "depth" | "health"
-
 // ── Position Map ───────────────────────────────────────────────────────────
 
 function PositionMapSVG({
@@ -170,7 +168,7 @@ function PositionMapSVG({
       className="w-full"
       onMouseMove={handleMouseMove}
       onMouseLeave={() => setHover(null)}
-      style={{ cursor: traders.length > 0 ? "crosshair" : "default", height: MAP_HEIGHT }}
+      style={{ cursor: traders.length > 0 ? "crosshair" : "default" }}
     >
       {/* Y-axis grid (size) */}
       {yTicks.map((tick) => {
@@ -308,12 +306,10 @@ function PositionMapSVG({
   )
 }
 
-// ── Market Depth Bar ───────────────────────────────────────────────────────
+// ── Market Depth Panel ────────────────────────────────────────────────────
+// Rendered as stacked div rows instead of a single SVG — scales better in narrow columns
 
-function DepthBarSVG({ data }: { data: SlabDetail }) {
-  const chartW = 600
-  const totalH = 130
-
+function DepthPanel({ data }: { data: SlabDetail }) {
   const longSize = data.summary.totalLongNotional
   const shortSize = data.summary.totalShortNotional
   const total = longSize + shortSize
@@ -326,231 +322,143 @@ function DepthBarSVG({ data }: { data: SlabDetail }) {
   const oiSol = data.openInterestSol
   const insuranceRatio = oiSol > 0 ? insuranceSol / oiSol : tvlSol > 0 ? 1 : 0
   const utilizationPct = data.maxAccountCapacity > 0 ? (data.engine.numUsedAccounts / data.maxAccountCapacity) * 100 : 0
-
-  const barW = chartW - 70
-  const barH = 28
+  const utilColor = utilizationPct > 100 ? COLOR_RED : utilizationPct > 80 ? COLOR_AMBER : COLOR_GREEN
 
   return (
-    <svg viewBox={`0 0 ${chartW} ${totalH}`} preserveAspectRatio="xMidYMid meet" className="w-full" style={{ height: totalH }}>
-      {/* Long/Short bar section */}
-      <text x={4} y={12} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">LONG / SHORT BALANCE</text>
-
-      {/* Bar background */}
-      <rect x={4} y={18} width={barW} height={barH} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-
-      {hasPositions ? (
-        <>
-          <rect x={4} y={18} width={Math.max(1, barW * longPct)} height={barH} rx={1} fill={COLOR_GREEN} opacity={0.5} />
-          <rect x={4 + barW * longPct} y={18} width={Math.max(1, barW * shortPct)} height={barH} rx={1} fill={COLOR_RED} opacity={0.5} />
-          <line x1={4 + barW * longPct} x2={4 + barW * longPct} y1={16} y2={48} stroke="#fff" strokeWidth={0.5} opacity={0.4} />
-          <text x={10} y={36} fill={COLOR_GREEN} fontSize={9} fontFamily="monospace" fontWeight="bold">
-            LONG {(longPct * 100).toFixed(0)}%
-          </text>
-          <text x={barW} y={36} fill={COLOR_RED} fontSize={9} fontFamily="monospace" fontWeight="bold" textAnchor="end">
-            {(shortPct * 100).toFixed(0)}% SHORT
-          </text>
-          <text x={barW + 8} y={26} fill={COLOR_GREEN} fontSize={7} fontFamily="monospace">{fmtSol(longSize)}</text>
-          <text x={barW + 8} y={38} fill={COLOR_RED} fontSize={7} fontFamily="monospace">{fmtSol(shortSize)}</text>
-          <text x={barW + 8} y={48} fill={COLOR_DIM} fontSize={6} fontFamily="monospace">SOL</text>
-        </>
-      ) : (
-        <text x={4 + barW / 2} y={36} fill={COLOR_DIM} fontSize={9} fontFamily="monospace" textAnchor="middle">
-          NO OPEN POSITIONS
-        </text>
-      )}
-
-      {/* Metrics section */}
-      <text x={4} y={66} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">MARKET METRICS</text>
-
-      {/* TVL bar */}
-      <text x={4} y={80} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">TVL</text>
-      <rect x={40} y={73} width={200} height={10} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={40} y={73} width={tvlSol > 0 ? 200 : 0} height={10} rx={1} fill={COLOR_GREEN} opacity={0.4} />
-      <text x={244} y={82} fill={COLOR_GREEN} fontSize={7} fontFamily="monospace">
-        {fmtSol(tvlSol)} SOL
-      </text>
-
-      {/* OI bar — relative to TVL */}
-      <text x={4} y={95} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">OI</text>
-      <rect x={40} y={88} width={200} height={10} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={40} y={88} width={tvlSol > 0 ? Math.min(200, (oiSol / tvlSol) * 200) : 0} height={10} rx={1} fill={COLOR_AMBER} opacity={0.5} />
-      <text x={244} y={97} fill={oiSol > 0 ? COLOR_AMBER : COLOR_DIM} fontSize={7} fontFamily="monospace">
-        {oiSol > 0 ? `${fmtSol(oiSol)} SOL` : "NONE"}
-      </text>
-
-      {/* Insurance bar */}
-      <text x={4} y={110} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">INS</text>
-      <rect x={40} y={103} width={200} height={10} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect x={40} y={103} width={tvlSol > 0 ? Math.min(200, (insuranceSol / tvlSol) * 200) : 0} height={10} rx={1} fill={COLOR_CYAN} opacity={0.5} />
-      <text x={244} y={112} fill={insuranceSol > 0 ? COLOR_CYAN : COLOR_DIM} fontSize={7} fontFamily="monospace">
-        {insuranceSol > 0
-          ? `${fmtSol(insuranceSol)} SOL${oiSol > 0 ? ` (${(insuranceRatio * 100).toFixed(1)}% of OI)` : ""}`
-          : "NONE"}
-      </text>
-
-      {/* Utilization gauge — right side */}
-      <text x={380} y={80} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">UTILIZATION</text>
-      <rect x={380} y={88} width={160} height={18} rx={1} fill={COLOR_BG} stroke={COLOR_BORDER} strokeWidth={0.5} />
-      <rect
-        x={380} y={88}
-        width={Math.min(160, utilizationPct * 1.6)}
-        height={18} rx={1}
-        fill={utilizationPct > 100 ? COLOR_RED : utilizationPct > 80 ? COLOR_AMBER : COLOR_GREEN}
-        opacity={0.4}
-      />
-      <text x={460} y={101} fill="#fff" fontSize={9} fontFamily="monospace" fontWeight="bold" textAnchor="middle">
-        {data.engine.numUsedAccounts} / {data.maxAccountCapacity} ({Math.round(utilizationPct)}%)
-      </text>
-
-      {/* Warning for >100% utilization */}
-      {utilizationPct > 100 && (
-        <text x={460} y={122} fill={COLOR_RED} fontSize={7} fontFamily="monospace" textAnchor="middle">
-          OVER CAPACITY
-        </text>
-      )}
-    </svg>
-  )
-}
-
-// ── Health Heatmap ─────────────────────────────────────────────────────────
-
-function HealthHeatmapSVG({ positions }: { positions: SlabPosition[] }) {
-  const chartW = 600
-
-  // Active = non-flat traders + all LPs
-  const active = useMemo(
-    () => positions.filter((p) => p.side !== "flat" || p.isLP).sort((a, b) => a.marginHealth - b.marginHealth),
-    [positions],
-  )
-
-  if (active.length === 0) {
-    return (
-      <svg viewBox={`0 0 ${chartW} 40`} preserveAspectRatio="xMidYMid meet" className="w-full" style={{ height: 40 }}>
-        <text x={chartW / 2} y={24} fill={COLOR_DIM} fontSize={10} fontFamily="monospace" textAnchor="middle">
-          NO ACTIVE POSITIONS
-        </text>
-      </svg>
-    )
-  }
-
-  const maxH = 140
-  const cols = Math.ceil(Math.sqrt(active.length * (chartW / maxH)))
-  const rows = Math.ceil(active.length / cols)
-  const cellW = (chartW - 8) / cols
-  const cellH = Math.min(16, (maxH - 30) / rows)
-  const actualH = 24 + rows * cellH + 4
-
-  const safe = active.filter((p) => p.status === "safe").length
-  const atRisk = active.filter((p) => p.status === "at_risk").length
-  const liquidatable = active.filter((p) => p.status === "liquidatable").length
-
-  return (
-    <svg viewBox={`0 0 ${chartW} ${actualH}`} preserveAspectRatio="xMidYMid meet" className="w-full" style={{ height: Math.max(60, actualH) }}>
-      {/* Header stats */}
-      <text x={4} y={11} fill={COLOR_GREEN} fontSize={8} fontFamily="monospace" fontWeight="bold">
-        SAFE: {safe}
-      </text>
-      <text x={100} y={11} fill={COLOR_AMBER} fontSize={8} fontFamily="monospace" fontWeight="bold">
-        AT RISK: {atRisk}
-      </text>
-      <text x={210} y={11} fill={COLOR_RED} fontSize={8} fontFamily="monospace" fontWeight="bold">
-        LIQUIDATABLE: {liquidatable}
-      </text>
-
-      {/* Legend */}
-      <rect x={chartW - 160} y={3} width={8} height={8} fill={COLOR_GREEN} opacity={0.7} rx={1} />
-      <text x={chartW - 148} y={11} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">&gt;80</text>
-      <rect x={chartW - 120} y={3} width={8} height={8} fill={COLOR_AMBER} opacity={0.7} rx={1} />
-      <text x={chartW - 108} y={11} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">40-80</text>
-      <rect x={chartW - 74} y={3} width={8} height={8} fill={COLOR_RED} opacity={0.7} rx={1} />
-      <text x={chartW - 62} y={11} fill={COLOR_DIM} fontSize={7} fontFamily="monospace">&lt;40</text>
-
-      {/* Cells */}
-      {active.map((p, i) => {
-        const col = i % cols
-        const row = Math.floor(i / cols)
-        const x = 4 + col * cellW
-        const y = 20 + row * cellH
-        const color = healthColor(p.marginHealth)
-        const opacity = p.marginHealth < 40 ? 0.9 : p.marginHealth < 80 ? 0.6 : 0.4
-
-        return (
-          <g key={`cell-${i}`}>
-            <rect
-              x={x + 0.5} y={y + 0.5}
-              width={cellW - 1} height={cellH - 1}
-              rx={1} fill={color} opacity={opacity}
-              stroke={COLOR_BG} strokeWidth={0.5}
-            />
-            {cellW > 16 && cellH > 10 && (
-              <text
-                x={x + cellW / 2} y={y + cellH / 2 + 3}
-                fill="#000" fontSize={Math.min(7, cellH - 4)}
-                fontFamily="monospace" fontWeight="bold" textAnchor="middle"
-              >
-                {p.marginHealth}
-              </text>
-            )}
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-// ── Main Component ─────────────────────────────────────────────────────────
-
-export function MarketVisual({ data }: { data: SlabDetail }) {
-  // Default to depth view — most useful at a glance, works even for empty markets
-  const hasTraders = data.positions.some((p) => !p.isLP && p.side !== "flat" && p.entryPrice > 0)
-  const [view, setView] = useState<ViewMode>(hasTraders ? "positions" : "depth")
-
-  const views: { key: ViewMode; label: string }[] = [
-    { key: "positions", label: "POSITIONS" },
-    { key: "depth", label: "DEPTH" },
-    { key: "health", label: "HEALTH" },
-  ]
-
-  return (
-    <div className="flex flex-col gap-0">
-      {/* View selector */}
-      <div className="flex items-center gap-2 px-1 mb-1">
-        {views.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => setView(v.key)}
-            className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 border transition-all select-none"
-            style={{
-              color: view === v.key ? COLOR_GREEN : COLOR_DIM,
-              borderColor: view === v.key ? COLOR_GREEN : "transparent",
-              backgroundColor: view === v.key ? "rgba(0, 255, 65, 0.07)" : "transparent",
-            }}
-          >
-            {v.label}
-          </button>
-        ))}
-        <span className="flex-1" />
-        <span className="text-[9px] text-[var(--terminal-dim)]">
-          {data.summary.totalPositions} positions
-        </span>
-      </div>
-
-      {/* Chart area */}
-      <div
-        className="relative w-full border border-[var(--terminal-border)] bg-[var(--terminal-bg)]"
-      >
-        {view === "positions" && (
-          <PositionMapSVG data={data} positions={data.positions} />
-        )}
-        {view === "depth" && (
-          <DepthBarSVG data={data} />
-        )}
-        {view === "health" && (
-          <div className="p-1">
-            <HealthHeatmapSVG positions={data.positions} />
+    <div className="flex flex-col gap-2 p-1.5 font-mono text-[9px]">
+      {/* Long / Short Balance */}
+      <div>
+        <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: COLOR_DIM }}>Long / Short Balance</div>
+        <div className="relative w-full h-6 border rounded-sm" style={{ borderColor: COLOR_BORDER, backgroundColor: COLOR_BG }}>
+          {hasPositions ? (
+            <>
+              <div
+                className="absolute inset-y-0 left-0 rounded-sm"
+                style={{ width: `${longPct * 100}%`, backgroundColor: COLOR_GREEN, opacity: 0.5 }}
+              />
+              <div
+                className="absolute inset-y-0 right-0 rounded-sm"
+                style={{ width: `${shortPct * 100}%`, backgroundColor: COLOR_RED, opacity: 0.5 }}
+              />
+              <div className="absolute inset-0 flex items-center justify-between px-1.5 text-[8px] font-bold">
+                <span style={{ color: COLOR_GREEN }}>LONG {(longPct * 100).toFixed(0)}%</span>
+                <span style={{ color: COLOR_RED }}>{(shortPct * 100).toFixed(0)}% SHORT</span>
+              </div>
+            </>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center text-[8px]" style={{ color: COLOR_DIM }}>
+              NO OPEN POSITIONS
+            </div>
+          )}
+        </div>
+        {hasPositions && (
+          <div className="flex justify-between mt-0.5 text-[7px]" style={{ color: COLOR_DIM }}>
+            <span style={{ color: COLOR_GREEN }}>{fmtSol(longSize)} SOL</span>
+            <span style={{ color: COLOR_RED }}>{fmtSol(shortSize)} SOL</span>
           </div>
         )}
       </div>
+
+      {/* Market Metrics */}
+      <div>
+        <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: COLOR_DIM }}>Market Metrics</div>
+        <div className="flex flex-col gap-1">
+          {/* TVL */}
+          <MetricBar label="TVL" value={tvlSol} max={tvlSol} color={COLOR_GREEN} text={`${fmtSol(tvlSol)} SOL`} />
+          {/* OI — relative to TVL */}
+          <MetricBar label="OI" value={oiSol} max={tvlSol} color={COLOR_AMBER} text={oiSol > 0 ? `${fmtSol(oiSol)} SOL` : "NONE"} />
+          {/* Insurance — relative to TVL */}
+          <MetricBar
+            label="INS"
+            value={insuranceSol}
+            max={tvlSol}
+            color={COLOR_CYAN}
+            text={insuranceSol > 0
+              ? `${fmtSol(insuranceSol)} SOL${oiSol > 0 ? ` (${(insuranceRatio * 100).toFixed(1)}% of OI)` : ""}`
+              : "NONE"
+            }
+          />
+        </div>
+      </div>
+
+      {/* Utilization */}
+      <div>
+        <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: COLOR_DIM }}>Utilization</div>
+        <div className="relative w-full h-4 border rounded-sm" style={{ borderColor: COLOR_BORDER, backgroundColor: COLOR_BG }}>
+          <div
+            className="absolute inset-y-0 left-0 rounded-sm"
+            style={{ width: `${Math.min(100, utilizationPct)}%`, backgroundColor: utilColor, opacity: 0.4 }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold" style={{ color: "#fff" }}>
+            {data.engine.numUsedAccounts} / {data.maxAccountCapacity} ({Math.round(utilizationPct)}%)
+          </div>
+        </div>
+        {utilizationPct > 100 && (
+          <div className="text-center text-[7px] mt-0.5" style={{ color: COLOR_RED }}>OVER CAPACITY</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Reusable horizontal metric bar */
+function MetricBar({ label, value, max, color, text }: {
+  label: string
+  value: number
+  max: number
+  color: string
+  text: string
+}) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-6 text-right text-[7px] shrink-0" style={{ color: COLOR_DIM }}>{label}</span>
+      <div className="relative flex-1 h-2.5 border rounded-sm" style={{ borderColor: COLOR_BORDER, backgroundColor: COLOR_BG }}>
+        <div className="absolute inset-y-0 left-0 rounded-sm" style={{ width: `${pct}%`, backgroundColor: color, opacity: 0.5 }} />
+      </div>
+      <span className="text-[7px] shrink-0" style={{ color: value > 0 ? color : COLOR_DIM }}>{text}</span>
+    </div>
+  )
+}
+
+// ── Exported Sub-components ───────────────────────────────────────────────
+// The parent (slab-detail-view) lays these out in a 2-column grid
+
+export function PositionMapPanel({ data }: { data: SlabDetail }) {
+  return (
+    <div className="border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
+      <div className="px-1.5 py-0.5 border-b border-[var(--terminal-border)] flex items-center justify-between">
+        <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--terminal-green)]">Positions</span>
+        <span className="text-[8px] text-[var(--terminal-dim)]">
+          {data.positions.filter((p) => !p.isLP && p.side !== "flat" && p.entryPrice > 0).length} traders
+        </span>
+      </div>
+      <PositionMapSVG data={data} positions={data.positions} />
+    </div>
+  )
+}
+
+export function DepthMetricsPanel({ data }: { data: SlabDetail }) {
+  return (
+    <div className="border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
+      <div className="px-1.5 py-0.5 border-b border-[var(--terminal-border)] flex items-center justify-between">
+        <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--terminal-green)]">Depth</span>
+        <span className="text-[8px] text-[var(--terminal-dim)]">
+          {data.summary.totalPositions} positions
+        </span>
+      </div>
+      <DepthPanel data={data} />
+    </div>
+  )
+}
+
+// ── Combined 2-column layout ──────────────────────────────────────────────
+
+export function MarketVisual({ data }: { data: SlabDetail }) {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
+      <PositionMapPanel data={data} />
+      <DepthMetricsPanel data={data} />
     </div>
   )
 }
