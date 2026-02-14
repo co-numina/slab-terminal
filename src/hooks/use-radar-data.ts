@@ -12,6 +12,8 @@ export interface SlabRadar {
   lastCrankSlot: number
   lastCrankAge: number
   vaultPubkey: string
+  collateralMint?: string
+  collateralSymbol?: string
   health: HealthStatus
 }
 

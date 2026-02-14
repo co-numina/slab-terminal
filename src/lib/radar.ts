@@ -25,6 +25,7 @@ export interface SlabRadarEntry {
   lastCrankAge: number;       // seconds since last crank
   vaultPubkey: string;
   collateralMint: string;     // extracted from header for early mint resolution
+  collateralSymbol?: string;  // resolved token symbol (SOL, USDC, etc.)
   health: HealthStatus;
 }
 

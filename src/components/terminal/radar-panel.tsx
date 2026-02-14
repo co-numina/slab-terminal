@@ -80,7 +80,11 @@ function SlabRow({ slab, network, programLabel, programId }: { slab: SlabRadar; 
     >
       <div className="flex items-center gap-2">
         <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: color }} />
-        <span className="text-[var(--terminal-dim)]">{slab.label}</span>
+        {slab.collateralSymbol ? (
+          <span className="text-[var(--terminal-text)] font-bold">{slab.collateralSymbol}/USD</span>
+        ) : (
+          <span className="text-[var(--terminal-dim)]">{slab.label}</span>
+        )}
         <span className="text-[var(--terminal-cyan)] font-mono group-hover:text-[var(--terminal-green)] transition-colors">
           {truncateAddress(slab.pubkey, 4)}
         </span>
