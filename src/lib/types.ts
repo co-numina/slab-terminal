@@ -145,6 +145,11 @@ export interface MarketResponse {
   lifetimeForceCloses: number;
   lastEffectivePriceE6: string;
   timestamp: string;
+  // Explorer link pubkeys
+  programId: string;
+  slabAddresses: string[];
+  vaultAddresses: string[];
+  oracleAddress: string;
 }
 
 export interface PositionEntry {
@@ -191,6 +196,8 @@ export interface LPEntry {
   label: string;
   slabPubkey: string;
   slabLabel: string;
+  pdaPubkey: string;
+  matcherContextPubkey: string;
   collateral: number;
   pnl: number;
   effectiveCapital: number;
@@ -218,6 +225,8 @@ export interface ActivityEvent {
   type: 'trade' | 'crank' | 'funding' | 'deposit' | 'withdraw' | 'liquidation' | 'info';
   details: string;
   severity: 'normal' | 'warning' | 'critical';
+  signature?: string;
+  slabLabel?: string;
 }
 
 export interface ActivityResponse {

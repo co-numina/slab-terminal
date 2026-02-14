@@ -17,12 +17,18 @@ export interface MarketData {
   tradingFeeBps: number
   numSlabs: number
   numAccounts: number
+  // Explorer pubkeys
+  programId?: string
+  slabAddresses?: string[]
+  vaultAddresses?: string[]
+  oracleAddress?: string
 }
 
 export interface Position {
   accountIndex: number
   slabPubkey: string
   slabLabel: string
+  owner?: string
   side: "long" | "short" | "flat"
   size: number
   entryPrice: number
@@ -42,7 +48,11 @@ export interface LP {
   label: string
   slabPubkey: string
   slabLabel: string
+  pdaPubkey?: string
+  matcherContextPubkey?: string
   collateral: number
+  pnl?: number
+  effectiveCapital?: number
   spreadBps: number
   tradingFeeBps: number
   impactKBps?: number | null
@@ -59,6 +69,8 @@ export interface ActivityEvent {
   type: "trade" | "crank" | "funding" | "deposit" | "withdraw" | "liquidation" | "info"
   details: string
   severity?: string
+  signature?: string
+  slabLabel?: string
 }
 
 export function useMarketData() {

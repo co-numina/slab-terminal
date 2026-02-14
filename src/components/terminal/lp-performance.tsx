@@ -1,7 +1,17 @@
 "use client"
 
+import { useState } from "react"
 import { useLPs, type LP } from "@/hooks/use-market-data"
 import { TerminalPanel } from "./terminal-panel"
+import { ExplorerLink } from "./explorer-link"
+
+function isActiveLp(lp: LP): boolean {
+  return (
+    lp.inventory !== 0 ||
+    lp.lastExecPrice > 0 ||
+    lp.collateral > 0.5
+  )
+}
 
 function UtilizationBar({ percent }: { percent: number }) {
   const totalBars = 30
@@ -29,18 +39,20 @@ function LPCard({ lp }: { lp: LP }) {
   const accentColor = isPassive ? "var(--terminal-green)" : "var(--terminal-cyan)"
   const liquidityNotional = lp.liquidityNotional ?? lp.collateral * (lp.lastOraclePrice ?? 148.55)
 
-  // Use the full label from the API (includes slab context)
   const displayLabel = lp.label || `LP ${lp.index}`
 
   return (
     <div className="border border-[var(--terminal-border)]">
       <div
-        className="flex items-center border-b border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-2 py-1"
+        className="flex items-center justify-between border-b border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-2 py-1"
         style={{ borderLeft: `2px solid ${accentColor}` }}
       >
         <span className="text-xs font-bold" style={{ color: accentColor }}>
           {displayLabel}
         </span>
+        {lp.pdaPubkey && (
+          <ExplorerLink type="address" address={lp.pdaPubkey} />
+        )}
       </div>
       <div className="flex flex-col gap-0.5 p-2">
         <div className="flex justify-between">
@@ -80,16 +92,78 @@ function LPCard({ lp }: { lp: LP }) {
   )
 }
 
+function InactiveLPRow({ lp }: { lp: LP }) {
+  const isPassive = lp.type === "passive"
+  const accentColor = isPassive ? "var(--terminal-green)" : "var(--terminal-cyan)"
+
+  return (
+    <div className="flex items-center justify-between py-0.5 px-1 text-[10px] opacity-60 hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-2">
+        <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: accentColor }} />
+        <span className="text-[var(--terminal-dim)]">LP {lp.index}</span>
+        <span className="text-[9px] uppercase" style={{ color: accentColor }}>
+          {isPassive ? "PASSIVE" : "vAMM"}
+        </span>
+        <span className="text-[9px] text-[var(--terminal-dim)]">{lp.slabLabel}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-[var(--terminal-dim)]">{lp.collateral.toFixed(2)} SOL</span>
+        {lp.pdaPubkey && (
+          <ExplorerLink type="address" address={lp.pdaPubkey} />
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function LPPerformance() {
   const { data } = useLPs()
   const lps = data?.lps ?? []
+  const [showInactive, setShowInactive] = useState(false)
+
+  const activeLps = lps.filter(isActiveLp)
+  const inactiveLps = lps.filter((lp) => !isActiveLp(lp))
 
   return (
-    <TerminalPanel title={`LP Performance [${lps.length}]`} className="h-full">
-      <div className="flex flex-col gap-2">
-        {lps.map((lp) => (
-          <LPCard key={lp.label || `${lp.index}`} lp={lp} />
+    <TerminalPanel title={`LP Performance [${activeLps.length} ACTIVE / ${lps.length} TOTAL]`} className="h-full">
+      <div className="max-h-[700px] overflow-y-auto flex flex-col gap-2">
+        {/* Active LP cards */}
+        {activeLps.map((lp) => (
+          <LPCard key={lp.label || `${lp.slabLabel}-${lp.index}`} lp={lp} />
         ))}
+
+        {activeLps.length === 0 && lps.length > 0 && (
+          <div className="flex items-center justify-center py-2">
+            <span className="text-[10px] text-[var(--terminal-dim)]">NO ACTIVE LPs</span>
+          </div>
+        )}
+
+        {/* Inactive LPs collapsible section */}
+        {inactiveLps.length > 0 && (
+          <div className="border-t border-[var(--terminal-border)] pt-1">
+            <button
+              onClick={() => setShowInactive(!showInactive)}
+              className="flex w-full items-center gap-2 py-1 text-[10px] text-[var(--terminal-dim)] hover:text-[var(--terminal-amber)] transition-colors select-none"
+            >
+              <span className="text-[var(--terminal-amber)]">{showInactive ? "\u25bc" : "\u25b6"}</span>
+              <span className="uppercase tracking-wider">
+                INACTIVE LPs ({inactiveLps.length})
+              </span>
+              <span className="flex-1 border-t border-dashed border-[var(--terminal-border)]" />
+              <span className="text-[9px]">
+                {showInactive ? "COLLAPSE" : "EXPAND"}
+              </span>
+            </button>
+            {showInactive && (
+              <div className="flex flex-col mt-1">
+                {inactiveLps.map((lp) => (
+                  <InactiveLPRow key={lp.label || `${lp.slabLabel}-${lp.index}`} lp={lp} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {lps.length === 0 && (
           <div className="flex items-center justify-center py-4">
             <span className="text-xs text-[var(--terminal-green)] animate-blink-cursor">{"\u2588"}</span>

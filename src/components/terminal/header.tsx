@@ -1,6 +1,7 @@
 "use client"
 
 import { useMarketData } from "@/hooks/use-market-data"
+import { ExplorerLink, truncateAddress } from "./explorer-link"
 
 const ASCII_LOGO = `███████╗██╗     ███████╗ ██████╗
 ██╔════╝██║    ██╔══██╗██╔══██╗
@@ -35,6 +36,7 @@ export function Header() {
   const lastCrankSlot = data?.lastCrankSlot ?? 0
   const crankAgo = slot - lastCrankSlot
   const numSlabs = data?.numSlabs ?? 0
+  const primarySlab = data?.slabAddresses?.[0] ?? ""
 
   return (
     <header className="border-b border-[var(--terminal-border)] bg-[var(--terminal-panel)]">
@@ -59,6 +61,12 @@ export function Header() {
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--terminal-green)] animate-pulse-live" />
                 LIVE
               </span>
+              {primarySlab && (
+                <span className="hidden items-center gap-1 text-[9px] text-[var(--terminal-dim)] md:flex">
+                  SLAB: <span className="text-[var(--terminal-cyan)]">{truncateAddress(primarySlab)}</span>
+                  <ExplorerLink type="address" address={primarySlab} />
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -80,7 +88,7 @@ export function Header() {
                   : "text-[var(--terminal-red)]"
               }`}
             >
-              {isPositive ? "▲" : "▼"} {isPositive ? "+" : ""}
+              {isPositive ? "\u25b2" : "\u25bc"} {isPositive ? "+" : ""}
               {change.toFixed(2)}%
             </span>
           </div>

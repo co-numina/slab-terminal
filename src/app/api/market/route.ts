@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { CACHE_DURATIONS } from '@/lib/constants';
+import { CACHE_DURATIONS, CONFIG } from '@/lib/constants';
 import { getCached, setCache } from '@/lib/connection';
 import { calculateFundingRate } from '@/lib/percolator';
 import { getAllMarketData } from '@/lib/fetcher';
@@ -126,6 +126,11 @@ export async function GET() {
       lifetimeForceCloses: totalLifetimeForceCloses,
       lastEffectivePriceE6: slabs[0].config.lastEffectivePriceE6.toString(),
       timestamp: new Date().toISOString(),
+      // Explorer link pubkeys
+      programId: CONFIG.PROGRAM_ID.toBase58(),
+      slabAddresses: slabs.map(s => s.slabPubkey.toBase58()),
+      vaultAddresses: slabs.map(s => s.config.vaultPubkey.toBase58()),
+      oracleAddress: CONFIG.ORACLE.toBase58(),
     };
 
     setCache(CACHE_KEY, response);

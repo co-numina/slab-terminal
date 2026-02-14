@@ -2,22 +2,28 @@
 
 import { useMarketData } from "@/hooks/use-market-data"
 import { TerminalPanel } from "./terminal-panel"
+import { ExplorerLink } from "./explorer-link"
 
 function DataRow({
   label,
   value,
   valueColor = "var(--terminal-green)",
   trend,
+  explorerAddress,
 }: {
   label: string
   value: string
   valueColor?: string
   trend?: "up" | "down"
+  explorerAddress?: string
 }) {
   return (
     <div className="flex items-center justify-between py-0.5 pr-1">
-      <span className="text-[10px] uppercase tracking-wider text-[var(--terminal-dim)]">
+      <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--terminal-dim)]">
         {label}
+        {explorerAddress && (
+          <ExplorerLink type="address" address={explorerAddress} />
+        )}
       </span>
       <span className="flex items-center gap-1 text-xs font-medium" style={{ color: valueColor }}>
         {value}
@@ -49,6 +55,10 @@ export function MarketOverview() {
         ? "var(--terminal-green)"
         : "var(--terminal-red)"
 
+  const vaultAddress = data?.vaultAddresses?.[0] ?? ""
+  const oracleAddress = data?.oracleAddress ?? ""
+  const programId = data?.programId ?? ""
+
   if (isLoading) {
     return (
       <TerminalPanel title="Market Overview" className="h-full">
@@ -67,6 +77,7 @@ export function MarketOverview() {
           label="TVL"
           value={formatSol(data?.tvl ?? 0)}
           trend="up"
+          explorerAddress={vaultAddress}
         />
         <Divider />
         <DataRow
@@ -103,6 +114,44 @@ export function MarketOverview() {
           label="Init. Margin"
           value={`${(data?.initialMarginBps ?? 0) / 100}%`}
         />
+
+        {/* Additional aggregate stats */}
+        <Divider />
+        <DataRow
+          label="Slabs"
+          value={`${data?.numSlabs ?? 0}`}
+          valueColor="var(--terminal-cyan)"
+        />
+        <Divider />
+        <DataRow
+          label="Accounts"
+          value={`${data?.numAccounts ?? 0}`}
+          valueColor="var(--terminal-cyan)"
+        />
+
+        {/* Explorer links section */}
+        {(oracleAddress || programId) && (
+          <>
+            <Divider />
+            <div className="flex items-center justify-between py-1">
+              <span className="text-[10px] uppercase tracking-wider text-[var(--terminal-dim)]">
+                ON-CHAIN
+              </span>
+              <div className="flex items-center gap-3">
+                {oracleAddress && (
+                  <span className="flex items-center gap-1 text-[9px] text-[var(--terminal-dim)]">
+                    ORACLE <ExplorerLink type="address" address={oracleAddress} />
+                  </span>
+                )}
+                {programId && (
+                  <span className="flex items-center gap-1 text-[9px] text-[var(--terminal-dim)]">
+                    PROGRAM <ExplorerLink type="address" address={programId} />
+                  </span>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </TerminalPanel>
   )

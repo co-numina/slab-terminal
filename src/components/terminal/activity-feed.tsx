@@ -1,7 +1,8 @@
 "use client"
 
-import { useActivity, type ActivityEvent } from "@/hooks/use-market-data"
+import { useActivity, useMarketData, type ActivityEvent } from "@/hooks/use-market-data"
 import { TerminalPanel } from "./terminal-panel"
+import { ExplorerLink } from "./explorer-link"
 
 function eventColor(type: ActivityEvent["type"]): string {
   switch (type) {
@@ -20,6 +21,14 @@ function eventColor(type: ActivityEvent["type"]): string {
     default:
       return "var(--terminal-dim)"
   }
+}
+
+function formatCrankAge(slotDiff: number): string {
+  const seconds = Math.round(slotDiff * 0.4)
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+  return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`
 }
 
 function EventRow({ event }: { event: ActivityEvent }) {
@@ -52,16 +61,24 @@ function EventRow({ event }: { event: ActivityEvent }) {
       >
         {typeLabel}
       </span>
-      <span className="text-[10px] text-[var(--terminal-green)]">
+      <span className="flex-1 text-[10px] text-[var(--terminal-green)]">
         {event.details}
       </span>
+      {event.signature && (
+        <ExplorerLink type="tx" address={event.signature} className="shrink-0" />
+      )}
     </div>
   )
 }
 
 export function ActivityFeed() {
   const { data } = useActivity()
+  const { data: marketData } = useMarketData()
   const events = data?.events ?? []
+
+  const slot = marketData?.slot ?? 0
+  const lastCrankSlot = marketData?.lastCrankSlot ?? 0
+  const crankAgo = slot - lastCrankSlot
 
   return (
     <TerminalPanel title="Activity Log" className="h-full">
@@ -70,9 +87,25 @@ export function ActivityFeed() {
           <EventRow key={`${e.timestamp}-${i}`} event={e} />
         ))}
         {events.length === 0 && (
-          <div className="flex items-center justify-center py-4">
-            <span className="text-xs text-[var(--terminal-green)] animate-blink-cursor">{"\u2588"}</span>
-            <span className="ml-2 text-[10px] text-[var(--terminal-dim)]">AWAITING EVENTS...</span>
+          <div className="flex flex-col items-center gap-3 py-4">
+            <span className="text-[10px] font-bold text-[var(--terminal-amber)]">
+              MARKET IDLE {"\u2014"} NO RECENT ACTIVITY
+            </span>
+            <div className="flex flex-col gap-1 text-[10px]">
+              {crankAgo > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[var(--terminal-dim)]">Last crank:</span>
+                  <span className="text-[var(--terminal-green)]">{formatCrankAge(crankAgo)} ago</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <span className="text-[var(--terminal-dim)]">Status:</span>
+                <span className="text-[var(--terminal-amber)]">Waiting for trades...</span>
+              </div>
+            </div>
+            <span className="text-[9px] text-[var(--terminal-dim)] mt-1">
+              Devnet market activates when the random-traders bot is running.
+            </span>
           </div>
         )}
       </div>

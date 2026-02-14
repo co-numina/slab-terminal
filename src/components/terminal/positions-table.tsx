@@ -1,7 +1,9 @@
 "use client"
 
+import { useState } from "react"
 import { usePositions, type Position } from "@/hooks/use-market-data"
 import { TerminalPanel } from "./terminal-panel"
+import { ExplorerLink } from "./explorer-link"
 
 function healthColor(health: number): string {
   if (health > 70) return "var(--terminal-green)"
@@ -32,11 +34,14 @@ function HealthIndicator({ health }: { health: number }) {
   )
 }
 
-function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }) {
+const HEADERS = ["IDX", "SLAB", "SIDE", "SIZE", "ENTRY", "MARK", "PNL", "MARGIN", "HEALTH", ""] as const
+
+function PositionRow({ position, isOdd, dimmed }: { position: Position; isOdd: boolean; dimmed?: boolean }) {
   const isLong = position.side === "long"
   const isFlat = position.side === "flat"
   const pnlPositive = position.unrealizedPnlPercent >= 0
   const rowBg = isOdd ? "bg-[var(--terminal-row-alt)]" : ""
+  const opacity = dimmed ? "opacity-50" : ""
 
   const sideColor = isFlat
     ? "var(--terminal-dim)"
@@ -45,8 +50,11 @@ function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }
       : "var(--terminal-red)"
   const sideLabel = isFlat ? "FLAT" : isLong ? "LONG" : "SHORT"
 
+  // Link to owner if available, otherwise the slab
+  const explorerAddress = position.owner || position.slabPubkey
+
   return (
-    <tr className={`border-b border-[var(--terminal-border)] transition-colors hover:bg-[var(--terminal-hover)] ${rowBg}`}>
+    <tr className={`border-b border-[var(--terminal-border)] transition-colors hover:bg-[var(--terminal-hover)] ${rowBg} ${opacity}`}>
       <td className="px-2 py-1 text-left text-xs text-[var(--terminal-green)]">
         {String(position.accountIndex).padStart(3, "0")}
       </td>
@@ -60,18 +68,18 @@ function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }
       </td>
       <td className="px-2 py-1 text-right text-xs">
         <span style={{ color: sideColor }}>
-          {isFlat ? "—" : `${position.size > 0 ? "+" : ""}${position.size.toLocaleString()}`}
+          {isFlat ? "\u2014" : `${position.size > 0 ? "+" : ""}${position.size.toLocaleString()}`}
         </span>
       </td>
       <td className="px-2 py-1 text-right text-xs text-[var(--terminal-green)]">
-        {position.entryPrice > 0 ? position.entryPrice.toFixed(2) : "—"}
+        {position.entryPrice > 0 ? position.entryPrice.toFixed(2) : "\u2014"}
       </td>
       <td className="px-2 py-1 text-right text-xs text-[var(--terminal-green)]">
         {position.markPrice.toFixed(2)}
       </td>
       <td className="px-2 py-1 text-right text-xs">
         <span style={{ color: isFlat ? "var(--terminal-dim)" : pnlPositive ? "var(--terminal-green)" : "var(--terminal-red)" }}>
-          {isFlat ? "—" : `${pnlPositive ? "+" : ""}${position.unrealizedPnlPercent.toFixed(2)}%`}
+          {isFlat ? "\u2014" : `${pnlPositive ? "+" : ""}${position.unrealizedPnlPercent.toFixed(2)}%`}
         </span>
       </td>
       <td className="px-2 py-1 text-right text-xs text-[var(--terminal-green)]">
@@ -80,6 +88,11 @@ function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }
       <td className="px-2 py-1 text-right">
         <HealthIndicator health={position.marginHealth} />
       </td>
+      <td className="px-1 py-1 text-center">
+        {explorerAddress && (
+          <ExplorerLink type="address" address={explorerAddress} />
+        )}
+      </td>
     </tr>
   )
 }
@@ -87,14 +100,12 @@ function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }
 export function PositionsTable() {
   const { data } = usePositions()
   const positions = data?.positions ?? []
+  const [showFlat, setShowFlat] = useState(false)
 
-  // Sort: active positions first (by health), then flat positions
-  const active = positions.filter((p) => p.side !== "flat")
+  const active = positions
+    .filter((p) => p.side !== "flat")
+    .sort((a, b) => a.marginHealth - b.marginHealth)
   const flat = positions.filter((p) => p.side === "flat")
-  const sorted = [
-    ...active.sort((a, b) => a.marginHealth - b.marginHealth),
-    ...flat,
-  ]
 
   const totalLong = active.filter((p) => p.side === "long").reduce((s, p) => s + p.size, 0)
   const totalShort = active.filter((p) => p.side === "short").reduce((s, p) => s + p.size, 0)
@@ -116,7 +127,7 @@ export function PositionsTable() {
             </span>
           </span>
           <span className="text-[var(--terminal-dim)]">
-            SLABS: <span className="font-bold text-[var(--terminal-cyan)]">{new Set(positions.map((p) => p.slabLabel)).size}</span>
+            SLABS: <span className="font-bold text-[var(--terminal-cyan)]">{new Set(active.map((p) => p.slabLabel)).size}</span>
           </span>
         </div>
       )}
@@ -124,11 +135,11 @@ export function PositionsTable() {
         <table className="w-full min-w-[700px]">
           <thead>
             <tr className="border-b border-[var(--terminal-border)]">
-              {["IDX", "SLAB", "SIDE", "SIZE", "ENTRY", "MARK", "PNL", "MARGIN", "HEALTH"].map((h) => (
+              {HEADERS.map((h) => (
                 <th
-                  key={h}
+                  key={h || "explorer"}
                   className={`px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--terminal-dim)] ${
-                    h === "IDX" || h === "SIDE" || h === "SLAB" ? "text-left" : "text-right"
+                    h === "IDX" || h === "SIDE" || h === "SLAB" ? "text-left" : h === "" ? "w-6" : "text-right"
                   }`}
                 >
                   {h}
@@ -137,13 +148,44 @@ export function PositionsTable() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((p, i) => (
+            {/* Active positions */}
+            {active.map((p, i) => (
               <PositionRow
                 key={`${p.slabLabel ?? ""}-${p.accountIndex}`}
                 position={p}
                 isOdd={i % 2 === 1}
               />
             ))}
+
+            {/* Flat accounts collapsible section */}
+            {flat.length > 0 && (
+              <tr
+                className="border-b border-[var(--terminal-border)] cursor-pointer hover:bg-[var(--terminal-hover)] select-none"
+                onClick={() => setShowFlat(!showFlat)}
+              >
+                <td colSpan={HEADERS.length} className="px-2 py-1.5">
+                  <div className="flex items-center gap-2 text-[10px] text-[var(--terminal-dim)]">
+                    <span className="text-[var(--terminal-amber)]">{showFlat ? "\u25bc" : "\u25b6"}</span>
+                    <span className="uppercase tracking-wider">
+                      FLAT ACCOUNTS ({flat.length})
+                    </span>
+                    <span className="flex-1 border-t border-dashed border-[var(--terminal-border)]" />
+                    <span className="text-[9px]">
+                      {showFlat ? "COLLAPSE" : "EXPAND"}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {showFlat &&
+              flat.map((p, i) => (
+                <PositionRow
+                  key={`${p.slabLabel ?? ""}-${p.accountIndex}`}
+                  position={p}
+                  isOdd={i % 2 === 1}
+                  dimmed
+                />
+              ))}
           </tbody>
         </table>
         {positions.length === 0 && (

@@ -58,6 +58,8 @@ export async function GET() {
           (account.positionSize < 0n ? -account.positionSize : account.positionSize)
         ) / 1e9 * solUsdPrice;
 
+        const matcherCtxStr = lp.account.matcherContext.toBase58();
+
         if (!ctx) {
           lps.push({
             index: idx,
@@ -65,6 +67,8 @@ export async function GET() {
             label: `LP ${idx} (${slabLabel})`,
             slabPubkey: slabPubkey.toBase58(),
             slabLabel,
+            pdaPubkey: account.owner.toBase58(),
+            matcherContextPubkey: matcherCtxStr,
             collateral,
             pnl,
             effectiveCapital,
@@ -98,6 +102,8 @@ export async function GET() {
           label: `LP ${idx} — ${typeLabel} (${slabLabel})`,
           slabPubkey: slabPubkey.toBase58(),
           slabLabel,
+          pdaPubkey: ctx.lpPda.toBase58(),
+          matcherContextPubkey: matcherCtxStr,
           collateral,
           pnl,
           effectiveCapital,
