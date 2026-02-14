@@ -27,7 +27,7 @@ export function TerminalPanel({
         </span>
         <span className="px-1 py-0.5 text-[10px] text-[var(--terminal-border)]">{"\u2500\u2510"}</span>
       </div>
-      <div className="flex-1 px-3 py-2">{children}</div>
+      <div className="flex-1 px-2 py-1.5">{children}</div>
     </div>
   )
 }

@@ -60,8 +60,8 @@ function MarketRow({ market, rank }: { market: TopMarket; rank: number }) {
       className="border-b border-dotted border-[var(--terminal-border)] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group"
       onClick={() => navigateToSlab(market.slabAddress, market.program, market.network)}
     >
-      <td className="py-1 pr-2 text-[var(--terminal-dim)]">{rank}</td>
-      <td className="py-1 pr-2">
+      <td className="py-0.5 pr-1.5 text-[var(--terminal-dim)]">{rank}</td>
+      <td className="py-0.5 pr-1.5">
         <div className="flex items-center gap-1">
           <span className="text-[var(--terminal-cyan)] font-mono group-hover:text-[var(--terminal-green)] transition-colors">
             {market.collateralSymbol}/{market.config.invert ? "USD" : "USD"}
@@ -71,22 +71,22 @@ function MarketRow({ market, rank }: { market: TopMarket; rank: number }) {
           )}
         </div>
       </td>
-      <td className="py-1 pr-2 text-[9px]">
+      <td className="py-0.5 pr-1.5 text-[9px]">
         <span className="text-[var(--terminal-dim)]">{programShort(market.program)}</span>
       </td>
-      <td className="py-1 pr-2 text-right font-mono">{formatPrice(market.price)}</td>
-      <td className="py-1 pr-2 text-right font-mono text-[var(--terminal-green)]">
+      <td className="py-0.5 pr-1.5 text-right font-mono">{formatPrice(market.price)}</td>
+      <td className="py-0.5 pr-1.5 text-right font-mono text-[var(--terminal-green)]">
         {formatCompact(market.tvl)} {market.collateralSymbol}
       </td>
-      <td className="py-1 pr-2 text-right font-mono text-[var(--terminal-dim)]">
+      <td className="py-0.5 pr-1.5 text-right font-mono text-[var(--terminal-dim)]">
         {market.openInterest > 0 ? formatCompact(market.openInterest) : "-"}
       </td>
-      <td className="py-1 pr-2 text-right">
+      <td className="py-0.5 pr-1.5 text-right">
         <span className={market.positions.active > 0 ? "" : "text-[var(--terminal-dim)]"}>
           {posStr}
         </span>
       </td>
-      <td className="py-1 text-right">
+      <td className="py-0.5 text-right">
         <div className="flex items-center gap-1 justify-end">
           <div className="w-8 h-1.5 bg-[var(--terminal-bg)] border border-[var(--terminal-border)]">
             <div
@@ -110,9 +110,9 @@ export function TopMarkets() {
   if (isLoading || !data) {
     return (
       <TerminalPanel title="Top Markets">
-        <div className="flex items-center justify-center py-6">
+        <div className="flex items-center justify-center py-3">
           <span className="text-xs text-[var(--terminal-green)] animate-blink-cursor">{"\u2588"}</span>
-          <span className="ml-2 text-[10px] text-[var(--terminal-dim)]">PARSING TOP MARKETS...</span>
+          <span className="ml-2 text-[9px] text-[var(--terminal-dim)]">PARSING TOP MARKETS...</span>
         </div>
       </TerminalPanel>
     )
@@ -123,13 +123,13 @@ export function TopMarkets() {
   return (
     <TerminalPanel title={`Top Markets (${data.count} of ${data.totalCandidates})`}>
       {/* Sort bar */}
-      <div className="flex items-center gap-2 pb-2 border-b border-[var(--terminal-border)] text-[9px]">
+      <div className="flex items-center gap-1.5 pb-1 border-b border-[var(--terminal-border)] text-[8px]">
         <span className="text-[var(--terminal-dim)]">SORT:</span>
         {(["tvl", "positions", "health", "oi"] as SortKey[]).map((key) => (
           <button
             key={key}
             onClick={() => setSortKey(key)}
-            className={`px-1.5 py-0.5 uppercase tracking-wider border transition-all select-none ${
+            className={`px-1 py-px uppercase tracking-wider border transition-all select-none ${
               sortKey === key
                 ? "border-[var(--terminal-green)] text-[var(--terminal-green)]"
                 : "border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:text-[var(--terminal-green)]"
@@ -141,18 +141,18 @@ export function TopMarkets() {
       </div>
 
       {/* Table */}
-      <div className="max-h-[400px] overflow-y-auto mt-1">
+      <div className="max-h-[280px] overflow-y-auto mt-0.5">
         <table className="w-full text-[10px]">
           <thead>
             <tr className="text-[var(--terminal-dim)] text-left uppercase">
-              <th className="pb-1 pr-2">#</th>
-              <th className="pb-1 pr-2">MARKET</th>
-              <th className="pb-1 pr-2">PROGRAM</th>
-              <th className="pb-1 pr-2 text-right">PRICE</th>
-              <th className="pb-1 pr-2 text-right">TVL</th>
-              <th className="pb-1 pr-2 text-right">OI</th>
-              <th className="pb-1 pr-2 text-right">POS</th>
-              <th className="pb-1 text-right">HEALTH</th>
+              <th className="pb-0.5 pr-1.5">#</th>
+              <th className="pb-0.5 pr-1.5">MARKET</th>
+              <th className="pb-0.5 pr-1.5">PROGRAM</th>
+              <th className="pb-0.5 pr-1.5 text-right">PRICE</th>
+              <th className="pb-0.5 pr-1.5 text-right">TVL</th>
+              <th className="pb-0.5 pr-1.5 text-right">OI</th>
+              <th className="pb-0.5 pr-1.5 text-right">POS</th>
+              <th className="pb-0.5 text-right">HEALTH</th>
             </tr>
           </thead>
           <tbody>
@@ -163,9 +163,6 @@ export function TopMarkets() {
         </table>
       </div>
 
-      <div className="mt-2 text-[9px] text-[var(--terminal-dim)]">
-        Click any row to drill into slab detail
-      </div>
     </TerminalPanel>
   )
 }

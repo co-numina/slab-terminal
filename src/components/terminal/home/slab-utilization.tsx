@@ -76,20 +76,20 @@ function ProgramRow({ label, blocks, network, summary }: {
   const isMainnet = network === "mainnet"
 
   return (
-    <div className="py-1.5">
-      <div className="flex items-center gap-2 mb-0.5">
-        <span className="text-[9px] font-bold" style={{
+    <div className="py-0.5">
+      <div className="flex items-center gap-1.5 mb-px">
+        <span className="text-[8px] font-bold" style={{
           color: isMainnet ? "var(--terminal-amber)" : "var(--terminal-green)"
         }}>
           {programShort(label)}
           {isMainnet ? " \u26A0" : ""}
         </span>
-        <span className="text-[8px] text-[var(--terminal-dim)]">
-          ({totalSlabs} slab{totalSlabs !== 1 ? "s" : ""})
+        <span className="text-[7px] text-[var(--terminal-dim)]">
+          ({totalSlabs})
         </span>
       </div>
       <div className="flex items-center gap-0">
-        <span className="font-mono text-[12px] leading-none whitespace-nowrap" style={{ letterSpacing: "1px" }}>
+        <span className="font-mono text-[11px] leading-none whitespace-nowrap" style={{ letterSpacing: "1px" }}>
           {blocks.map((block, i) => {
             const pct = block.max > 0 ? (block.used / block.max) * 100 : 0
             return (
@@ -104,7 +104,7 @@ function ProgramRow({ label, blocks, network, summary }: {
             )
           })}
         </span>
-        <span className="ml-2 text-[8px] text-[var(--terminal-dim)] whitespace-nowrap">
+        <span className="ml-1.5 text-[7px] text-[var(--terminal-dim)] whitespace-nowrap">
           {activeSlabs}/{totalSlabs} active, {totalAccounts.toLocaleString()} accts
         </span>
       </div>
@@ -148,13 +148,13 @@ export function SlabUtilization({ programs }: { programs: ProgramSummary[] }) {
           )
         })}
       </div>
-      <div className="flex items-center gap-3 mt-2 pt-1.5 border-t border-[var(--terminal-border)] text-[8px] text-[var(--terminal-dim)]">
-        <span><span style={{ color: "#333333" }}>{"\u25AA"}</span> 0%</span>
-        <span><span style={{ color: "#00ff4177" }}>{"\u2591"}</span> 0-10%</span>
-        <span><span style={{ color: "#00ff4177" }}>{"\u2592"}</span> 10-50%</span>
-        <span><span style={{ color: "#ffd700" }}>{"\u2593"}</span> 50-90%</span>
-        <span><span style={{ color: "#00ff41" }}>{"\u2588"}</span> 90%+</span>
-        <span><span style={{ color: "#ff4444" }}>{"\u2588"}</span> overfull</span>
+      <div className="flex items-center gap-2 mt-1 pt-1 border-t border-[var(--terminal-border)] text-[7px] text-[var(--terminal-dim)]">
+        <span><span style={{ color: "#333333" }}>{"\u25AA"}</span>0%</span>
+        <span><span style={{ color: "#00ff4177" }}>{"\u2591"}</span>&lt;10</span>
+        <span><span style={{ color: "#00ff4177" }}>{"\u2592"}</span>10-50</span>
+        <span><span style={{ color: "#ffd700" }}>{"\u2593"}</span>50-90</span>
+        <span><span style={{ color: "#00ff41" }}>{"\u2588"}</span>90+</span>
+        <span><span style={{ color: "#ff4444" }}>{"\u2588"}</span>over</span>
       </div>
     </TerminalPanel>
   )

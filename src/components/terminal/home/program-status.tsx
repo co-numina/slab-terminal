@@ -28,25 +28,22 @@ function ProgramStatusCard({ program }: { program: ProgramSummary }) {
 
   return (
     <div
-      className="flex items-center justify-between py-1.5 px-3 border-b border-[var(--terminal-border)] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group"
+      className="flex items-center justify-between py-1 px-2 border-b border-[var(--terminal-border)] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group"
       onClick={() => setActiveView("radar")}
       title="View in Radar"
     >
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        {/* Health dot */}
+      <div className="flex items-center gap-1.5 min-w-0 flex-1">
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${program.health === "active" ? "animate-pulse-live" : ""}`}
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${program.health === "active" ? "animate-pulse-live" : ""}`}
           style={{ backgroundColor: color }}
         />
-
-        {/* Program info */}
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-[var(--terminal-green)] group-hover:text-[var(--terminal-amber)] transition-colors">
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-[var(--terminal-green)] group-hover:text-[var(--terminal-amber)] transition-colors">
               {program.label.toUpperCase()}
             </span>
             <span
-              className="px-1 py-px text-[8px] font-bold uppercase border"
+              className="px-0.5 text-[7px] font-bold uppercase border"
               style={{
                 color: program.network === "mainnet" ? "var(--terminal-green)" : "var(--terminal-amber)",
                 borderColor: program.network === "mainnet" ? "var(--terminal-green)" : "var(--terminal-amber)",
@@ -56,32 +53,23 @@ function ProgramStatusCard({ program }: { program: ProgramSummary }) {
             </span>
             <ExplorerLink type="address" address={program.programId} network={program.network} />
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[var(--terminal-dim)]">
+          <div className="flex items-center gap-x-2 text-[9px] text-[var(--terminal-dim)]">
             <span>{program.slabCount} slabs</span>
             <span>{program.accountCount.toLocaleString()} accts</span>
             {program.lastCrankAge > 0 && (
               <span>
                 crank: <span style={{ color: program.lastCrankAge < 60 ? "var(--terminal-green)" : program.lastCrankAge < 3600 ? "var(--terminal-amber)" : "var(--terminal-red)" }}>
-                  {formatAge(program.lastCrankAge)} ago
+                  {formatAge(program.lastCrankAge)}
                 </span>
               </span>
             )}
           </div>
-          {program.description && (
-            <span className="text-[9px] text-[var(--terminal-dim)] truncate">{program.description}</span>
-          )}
         </div>
       </div>
 
-      {/* Status badge */}
-      <div className="flex items-center gap-2 shrink-0 ml-2">
-        <span className="text-[10px] font-bold uppercase" style={{ color }}>
-          {program.health}
-        </span>
-        <span className="text-[var(--terminal-dim)] text-[10px] group-hover:text-[var(--terminal-amber)] transition-colors">
-          {"\u25B6"}
-        </span>
-      </div>
+      <span className="text-[9px] font-bold uppercase shrink-0 ml-1" style={{ color }}>
+        {program.health}
+      </span>
     </div>
   )
 }
@@ -93,13 +81,10 @@ export function ProgramStatus({ programs }: { programs: ProgramSummary[] }) {
 
   return (
     <TerminalPanel title="Program Status">
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-0">
         {sorted.map((p) => (
           <ProgramStatusCard key={p.id} program={p} />
         ))}
-      </div>
-      <div className="px-3 py-1.5 text-[9px] text-[var(--terminal-dim)]">
-        Click any program to view in RADAR
       </div>
     </TerminalPanel>
   )

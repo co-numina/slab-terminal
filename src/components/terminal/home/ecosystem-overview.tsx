@@ -11,11 +11,11 @@ function StatCard({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-1 border border-[var(--terminal-border)] px-3 py-2 min-w-[120px]">
-      <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--terminal-dim)]">
+    <div className="flex flex-col gap-0.5 border border-[var(--terminal-border)] px-2 py-1.5 min-w-[100px]">
+      <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--terminal-dim)]">
         {label}
       </span>
-      <div className="flex flex-col gap-0.5 text-[10px]">{children}</div>
+      <div className="flex flex-col gap-0 text-[9px]">{children}</div>
     </div>
   )
 }
@@ -35,55 +35,48 @@ export function EcosystemOverview({ data }: { data: EcosystemData }) {
 
   return (
     <TerminalPanel title="Ecosystem Overview">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {/* Programs */}
         <StatCard label="Programs">
-          <span className="text-lg font-bold text-[var(--terminal-green)]">{programs.total}</span>
-          <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+          <span className="text-sm font-bold text-[var(--terminal-green)]">{programs.total}</span>
+          <div className="flex flex-wrap gap-x-1.5">
             {programs.active > 0 && (
-              <span style={{ color: healthColor("active") }}>{programs.active} active</span>
+              <span style={{ color: healthColor("active") }}>{programs.active}a</span>
             )}
             {programs.stale > 0 && (
-              <span style={{ color: healthColor("stale") }}>{programs.stale} stale</span>
+              <span style={{ color: healthColor("stale") }}>{programs.stale}s</span>
             )}
             {programs.idle > 0 && (
-              <span style={{ color: healthColor("idle") }}>{programs.idle} idle</span>
+              <span style={{ color: healthColor("idle") }}>{programs.idle}i</span>
             )}
             {programs.dead > 0 && (
-              <span style={{ color: healthColor("dead") }}>{programs.dead} dead</span>
+              <span style={{ color: healthColor("dead") }}>{programs.dead}d</span>
             )}
           </div>
         </StatCard>
 
         {/* Markets */}
         <StatCard label="Markets">
-          <span className="text-lg font-bold text-[var(--terminal-green)]">~{slabs.withAccounts}</span>
-          <span className="text-[var(--terminal-dim)]">
-            across {slabs.total} slabs
-          </span>
+          <span className="text-sm font-bold text-[var(--terminal-green)]">~{slabs.withAccounts}</span>
+          <span className="text-[var(--terminal-dim)]">{slabs.total} slabs</span>
         </StatCard>
 
         {/* Active Positions */}
-        <StatCard label="Active Positions">
+        <StatCard label="Positions">
           {positions.activeLongs + positions.activeShorts > 0 ? (
             <>
-              <span className="text-lg font-bold text-[var(--terminal-green)]">
+              <span className="text-sm font-bold text-[var(--terminal-green)]">
                 {positions.activeLongs + positions.activeShorts}
               </span>
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <span className="text-[var(--terminal-green)]">{positions.activeLongs}L</span>
                 <span className="text-[var(--terminal-red)]">{positions.activeShorts}S</span>
-                {positions.flat > 0 && (
-                  <span className="text-[var(--terminal-dim)]">{positions.flat} flat</span>
-                )}
               </div>
             </>
           ) : (
             <>
-              <span className="text-lg font-bold text-[var(--terminal-dim)]">0</span>
-              <span className="text-[var(--terminal-dim)]">
-                {accounts.total.toLocaleString()} total accounts
-              </span>
+              <span className="text-sm font-bold text-[var(--terminal-dim)]">0</span>
+              <span className="text-[var(--terminal-dim)]">{accounts.total.toLocaleString()} accts</span>
             </>
           )}
         </StatCard>
@@ -91,12 +84,12 @@ export function EcosystemOverview({ data }: { data: EcosystemData }) {
         {/* TVL */}
         <StatCard label="TVL">
           {Object.entries(data.tvl).length > 0 ? (
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-0">
               {Object.entries(data.tvl).map(([key, val]) => {
                 const [symbol] = key.split("_")
                 return (
                   <div key={key} className="flex items-baseline gap-1">
-                    <span className="text-sm font-bold text-[var(--terminal-green)]">
+                    <span className="text-xs font-bold text-[var(--terminal-green)]">
                       {val.amount >= 1_000_000
                         ? `${(val.amount / 1_000_000).toFixed(1)}M`
                         : val.amount >= 1_000
@@ -104,7 +97,6 @@ export function EcosystemOverview({ data }: { data: EcosystemData }) {
                           : val.amount.toFixed(1)}
                     </span>
                     <span className="text-[var(--terminal-cyan)]">{symbol}</span>
-                    <span className="text-[var(--terminal-dim)]">({val.network})</span>
                   </div>
                 )
               })}
@@ -118,27 +110,24 @@ export function EcosystemOverview({ data }: { data: EcosystemData }) {
         <StatCard label="Mainnet">
           {networks.mainnet.programs > 0 ? (
             <>
-              <span className="text-lg font-bold text-[var(--terminal-green)]">
+              <span className="text-sm font-bold text-[var(--terminal-green)]">
                 {networks.mainnet.programs}
               </span>
               <span className="text-[var(--terminal-dim)]">
-                {networks.mainnet.slabs} slabs
-              </span>
-              <span className="text-[var(--terminal-dim)]">
-                {networks.mainnet.accounts} accounts
+                {networks.mainnet.slabs}sl / {networks.mainnet.accounts}ac
               </span>
             </>
           ) : (
-            <span className="text-[var(--terminal-dim)]">none detected</span>
+            <span className="text-[var(--terminal-dim)]">none</span>
           )}
         </StatCard>
 
         {/* Last Scan */}
         <StatCard label="Last Scan">
-          <span className="text-sm font-bold text-[var(--terminal-green)]">
+          <span className="text-xs font-bold text-[var(--terminal-green)]">
             {data.scanDurationMs}ms
           </span>
-          <span className="text-[9px] text-[var(--terminal-dim)]">
+          <span className="text-[8px] text-[var(--terminal-dim)]">
             {new Date(data.lastScan).toLocaleTimeString()}
           </span>
         </StatCard>

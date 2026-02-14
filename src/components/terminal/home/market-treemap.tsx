@@ -56,7 +56,7 @@ function MarketBlock({ market, isBig }: { market: TopMarket; isBig: boolean }) {
 
   return (
     <div
-      className="border px-2 py-1.5 cursor-pointer hover:bg-[var(--terminal-hover)] transition-colors group"
+      className="border px-1.5 py-1 cursor-pointer hover:bg-[var(--terminal-hover)] transition-colors group"
       style={{
         borderColor,
         backgroundColor: hasPositions ? "rgba(0, 255, 65, 0.02)" : "transparent",
@@ -97,15 +97,17 @@ export function MarketTreemap() {
   if (isLoading || !data) {
     return (
       <TerminalPanel title="Market Landscape">
-        <div className="flex items-center justify-center py-6">
+        <div className="flex items-center justify-center py-3">
           <span className="text-xs text-[var(--terminal-green)] animate-blink-cursor">{"\u2588"}</span>
-          <span className="ml-2 text-[10px] text-[var(--terminal-dim)]">MAPPING MARKETS...</span>
+          <span className="ml-2 text-[9px] text-[var(--terminal-dim)]">MAPPING MARKETS...</span>
         </div>
       </TerminalPanel>
     )
   }
 
-  const { hero, mid, small, rest } = categorizeTiers(data.markets)
+  // Filter to only markets with TVL > 0
+  const activeMarkets = data.markets.filter(m => m.tvl > 0)
+  const { hero, mid, small, rest } = categorizeTiers(activeMarkets)
 
   if (!hero) {
     return (
@@ -140,13 +142,12 @@ export function MarketTreemap() {
             ))}
             {rest > 0 && (
               <div
-                className="border border-[var(--terminal-border)] px-2 py-1.5 flex flex-col items-center justify-center"
+                className="border border-[var(--terminal-border)] px-1.5 py-1 flex flex-col items-center justify-center"
                 style={{ backgroundColor: "var(--terminal-bg)" }}
               >
-                <span className="text-[9px] text-[var(--terminal-dim)]">{rest}+ smaller</span>
-                <span className="text-[8px] text-[var(--terminal-dim)]">markets</span>
-                <span className="font-mono text-[10px] text-[var(--terminal-border)] mt-0.5">
-                  {"\u2591".repeat(10)}
+                <span className="text-[8px] text-[var(--terminal-dim)]">{rest}+ more</span>
+                <span className="font-mono text-[9px] text-[var(--terminal-border)]">
+                  {"\u2591".repeat(8)}
                 </span>
               </div>
             )}
@@ -154,9 +155,6 @@ export function MarketTreemap() {
         )}
       </div>
 
-      <div className="mt-2 text-[9px] text-[var(--terminal-dim)]">
-        Click any block to drill into market
-      </div>
     </TerminalPanel>
   )
 }
