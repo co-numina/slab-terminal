@@ -106,7 +106,7 @@ function MarketRow({ market, rank }: { market: TopMarket; rank: number }) {
   return (
     <tr
       className="border-b border-dotted border-[var(--terminal-border)] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group"
-      onClick={() => navigateToSlab(market.slabAddress, market.program, market.network)}
+      onClick={() => navigateToSlab(market.slabAddress, market.program, market.network, market.programId)}
     >
       <td className="py-0.5 pr-1.5 text-[var(--terminal-dim)]">{rank}</td>
       <td className="py-0.5 pr-1.5">

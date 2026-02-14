@@ -29,7 +29,7 @@ function LiquidationRow({ entry, severity }: { entry: LiquidationEntry; severity
       className={`border-b border-dotted border-[var(--terminal-border)] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group ${
         isCritical ? "bg-[rgba(255,0,0,0.03)]" : ""
       }`}
-      onClick={() => navigateToSlab(entry.slabAddress, entry.programLabel, entry.network)}
+      onClick={() => navigateToSlab(entry.slabAddress, entry.programLabel, entry.network, entry.program)}
     >
       <td className="py-1 pr-2">
         <span

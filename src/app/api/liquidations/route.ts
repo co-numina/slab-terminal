@@ -5,18 +5,33 @@
  * (OI > 0 or small programs). Skip Launch's 10K+ empty slabs.
  * Always parse SOV mainnet (real money at stake).
  *
+ * Performance: batch getMultipleAccountsInfo per network instead of
+ * per-slab getSlabMarketData() calls. All slab parsing is CPU-only.
+ *
  * Cache: 15s — safety-critical, needs to be responsive.
  */
+import { PublicKey } from '@solana/web3.js';
 import { NextResponse } from 'next/server';
 import { getCached, setCache } from '@/lib/connection';
 import { scanEcosystem } from '@/lib/radar';
-import { getSlabMarketData, type SlabDetail } from '@/lib/fetcher';
+import { batchFetchAccounts } from '@/lib/fetcher';
+import { parseConfig, parseParams, parseAllAccounts, computeMarginMetrics, estimateLiquidationPrice } from '@/lib/percolator';
+import { getEffectiveOraclePrice } from '@/lib/oracle';
+import { getNetworkConnection } from '@/lib/connections';
+import { AccountKind } from '@/lib/types';
 
 const CACHE_KEY = 'liquidations_response';
 const CACHE_MS = 15_000;
 
 // Programs where we always do full parse (small enough)
 const ALWAYS_PARSE = new Set(['toly-original', 'sov-mainnet', 'launch-large']);
+
+interface SlabParseJob {
+  pubkey: string;
+  programId: string;
+  programLabel: string;
+  network: 'devnet' | 'mainnet';
+}
 
 interface LiquidationEntry {
   slabAddress: string;
@@ -39,42 +54,79 @@ interface LiquidationEntry {
   status: string;
 }
 
-function extractLiquidations(detail: SlabDetail): LiquidationEntry[] {
+/**
+ * Parse a slab buffer and extract all positions with health < 100.
+ * Pure CPU operation — no RPC calls.
+ */
+function extractLiquidationsFromBuffer(
+  slabData: Buffer,
+  job: SlabParseJob,
+): { entries: LiquidationEntry[]; positionCount: number } {
+  const config = parseConfig(slabData);
+  const params = parseParams(slabData);
+  const allAccounts = parseAllAccounts(slabData);
+
+  // Oracle price from slab's last effective price
+  const oraclePriceE6 = config.lastEffectivePriceE6 > 0n
+    ? config.lastEffectivePriceE6
+    : 0n;
+  const solUsdPrice = oraclePriceE6 > 0n
+    ? getEffectiveOraclePrice(oraclePriceE6, config.invert)
+    : 0;
+
   const entries: LiquidationEntry[] = [];
 
-  for (const pos of detail.positions) {
-    // Only include positions with health < 100
-    if (pos.marginHealth >= 100) continue;
+  for (const { idx, account } of allAccounts) {
+    const metrics = computeMarginMetrics(account, oraclePriceE6, params);
 
-    // Calculate distance to liquidation
+    // Only include positions with health < 100
+    if (metrics.health >= 100) continue;
+
+    const isLP = account.kind === AccountKind.LP;
+
+    let side: 'long' | 'short' | 'flat';
+    if (account.positionSize === 0n) side = 'flat';
+    else if (account.positionSize > 0n) side = 'short'; // inverted market
+    else side = 'long';
+
+    const collateral = Number(account.capital) / 1e9;
+    const unrealizedPnlSol = Number(metrics.unrealizedPnl) / 1e9;
+    const size = Number(metrics.notionalLamports) / 1e9;
+    const entryPrice = Number(account.entryPrice) > 0
+      ? 1_000_000 / Number(account.entryPrice)
+      : 0;
+
+    const liqPriceE6 = estimateLiquidationPrice(account, params);
+    const liquidationPrice = liqPriceE6 > 0 ? 1_000_000 / liqPriceE6 : 0;
+
     let distancePercent = 0;
-    if (pos.liquidationPrice > 0 && pos.markPrice > 0) {
-      distancePercent = Math.abs((pos.liquidationPrice - pos.markPrice) / pos.markPrice) * 100;
+    if (liquidationPrice > 0 && solUsdPrice > 0) {
+      distancePercent = Math.abs((liquidationPrice - solUsdPrice) / solUsdPrice) * 100;
     }
 
     entries.push({
-      slabAddress: detail.slabPubkey,
-      program: detail.programId,
-      programLabel: detail.programLabel,
-      network: detail.network,
-      accountIndex: pos.accountIndex,
-      accountId: pos.accountId,
-      owner: pos.owner,
-      side: pos.side,
-      size: pos.size,
-      entryPrice: pos.entryPrice,
-      markPrice: pos.markPrice,
-      unrealizedPnlPercent: pos.unrealizedPnlPercent,
-      collateral: pos.collateral,
-      health: pos.marginHealth,
-      liquidationPrice: pos.liquidationPrice,
+      slabAddress: job.pubkey,
+      program: job.programId,
+      programLabel: job.programLabel,
+      network: job.network,
+      accountIndex: idx,
+      accountId: account.accountId.toString(),
+      owner: account.owner.toBase58(),
+      side,
+      size,
+      entryPrice,
+      markPrice: solUsdPrice,
+      unrealizedPnlPercent: collateral > 0 ? (unrealizedPnlSol / collateral) * 100 : 0,
+      collateral,
+      health: metrics.health,
+      liquidationPrice,
       distancePercent,
-      isLP: pos.isLP,
-      status: pos.status,
+      isLP,
+      status: metrics.status,
     });
   }
 
-  return entries;
+  return { entries, positionCount: allAccounts.length };
 }
 
 export async function GET() {
@@ -88,14 +140,19 @@ export async function GET() {
 
     const radar = await scanEcosystem();
 
-    // Determine which slabs to parse (with program hints)
-    const slabsToParse: { pubkey: string; programId: string; network: 'devnet' | 'mainnet' }[] = [];
+    // Determine which slabs to parse
+    const slabJobs: SlabParseJob[] = [];
 
     for (const program of radar.programs) {
       if (ALWAYS_PARSE.has(program.id)) {
         for (const slab of program.slabs) {
           if (slab.numUsedAccounts > 0) {
-            slabsToParse.push({ pubkey: slab.pubkey, programId: program.programId, network: program.network });
+            slabJobs.push({
+              pubkey: slab.pubkey,
+              programId: program.programId,
+              programLabel: program.label,
+              network: program.network,
+            });
           }
         }
       } else {
@@ -105,36 +162,62 @@ export async function GET() {
           .slice(0, 3);
 
         for (const slab of activeSlabs) {
-          slabsToParse.push({ pubkey: slab.pubkey, programId: program.programId, network: program.network });
+          slabJobs.push({
+            pubkey: slab.pubkey,
+            programId: program.programId,
+            programLabel: program.label,
+            network: program.network,
+          });
         }
       }
     }
 
-    // Parse slabs and collect liquidation entries
+    // ── BATCH FETCH: single getMultipleAccountsInfo per network ─────────
+
+    const devnetJobs = slabJobs.filter(j => j.network === 'devnet');
+    const mainnetJobs = slabJobs.filter(j => j.network === 'mainnet');
+
+    const [devnetSlabData, mainnetSlabData] = await Promise.all([
+      devnetJobs.length > 0
+        ? batchFetchAccounts(
+            getNetworkConnection('devnet'),
+            devnetJobs.map(j => new PublicKey(j.pubkey)),
+            10,
+          )
+        : Promise.resolve([] as (Buffer | null)[]),
+      mainnetJobs.length > 0
+        ? batchFetchAccounts(
+            getNetworkConnection('mainnet'),
+            mainnetJobs.map(j => new PublicKey(j.pubkey)),
+            10,
+          )
+        : Promise.resolve([] as (Buffer | null)[]),
+    ]);
+
+    // ── PARSE: all CPU, no RPC ──────────────────────────────────────────
+
     const allEntries: LiquidationEntry[] = [];
     let totalScanned = 0;
     let slabsParsed = 0;
 
-    // Parse in parallel batches of 5 (with hints to skip resolution)
-    for (let i = 0; i < slabsToParse.length; i += 5) {
-      const batch = slabsToParse.slice(i, i + 5);
-      const results = await Promise.allSettled(
-        batch.map(s => getSlabMarketData(s.pubkey, {
-          programId: s.programId,
-          network: s.network,
-        })),
-      );
+    function processBatch(jobs: SlabParseJob[], dataArr: (Buffer | null)[]) {
+      for (let i = 0; i < jobs.length; i++) {
+        const data = dataArr[i];
+        if (!data) continue;
 
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          const detail = result.value;
-          totalScanned += detail.positions.length;
+        try {
+          const { entries, positionCount } = extractLiquidationsFromBuffer(data, jobs[i]);
+          totalScanned += positionCount;
           slabsParsed++;
-          const entries = extractLiquidations(detail);
           allEntries.push(...entries);
+        } catch (err) {
+          console.warn(`[liquidations] Failed to parse slab ${jobs[i].pubkey}:`, err);
         }
       }
     }
+
+    processBatch(devnetJobs, devnetSlabData);
+    processBatch(mainnetJobs, mainnetSlabData);
 
     // Split into critical and warning
     const critical = allEntries
@@ -148,18 +231,6 @@ export async function GET() {
     // Summary stats
     const mainnetPrograms = radar.programs.filter(p => p.network === 'mainnet');
     const mainnetAccounts = mainnetPrograms.reduce((s, p) => s + p.accountCount, 0);
-
-    // Active positions (non-flat, non-LP)
-    let activePositionCount = 0;
-    let activeLongs = 0;
-    let activeShorts = 0;
-    // We only know this from fully-parsed slabs, but that's what we have
-    for (const entry of allEntries) {
-      if (entry.side === 'long') activeLongs++;
-      if (entry.side === 'short') activeShorts++;
-    }
-    // Get broader counts from parsed data
-    activePositionCount = activeLongs + activeShorts;
 
     const response = {
       critical,

@@ -1,22 +1,39 @@
 /**
  * GET /api/ecosystem — Aggregated ecosystem stats for HOME view.
  *
- * Uses radar data (header-level) + targeted full parses on small programs
- * (Toly: 48 accts, SOV: 253 accts) for position breakdowns.
- * Launch's 10K+ accounts get header-level stats only.
+ * Uses radar data (header-level) + batch RPC for position breakdowns.
+ * Programs tagged in PARSE_PROGRAMS get full slab fetch + CPU parse.
+ * Others get header-level stats only.
+ *
+ * Performance: single batch getMultipleAccountsInfo + batch vault
+ * balances + batch mint resolution — all in parallel. No per-slab
+ * getSlabMarketData() calls.
+ *
+ * Cache: 30s
  */
+import { PublicKey } from '@solana/web3.js';
 import { NextResponse } from 'next/server';
 import { getCached, setCache } from '@/lib/connection';
 import { scanEcosystem } from '@/lib/radar';
-import { getSlabMarketData } from '@/lib/fetcher';
+import { batchFetchAccounts, batchFetchVaultBalances } from '@/lib/fetcher';
+import { parseConfig, parseAllAccounts } from '@/lib/percolator';
 import { resolveMintSymbolsBatch } from '@/lib/known-mints';
 import { getNetworkConnection } from '@/lib/connections';
+import { AccountKind } from '@/lib/types';
 
 const CACHE_KEY = 'ecosystem_response';
 const CACHE_MS = 30_000;
 
 // Programs small enough to do full position parsing
 const PARSE_PROGRAMS = new Set(['toly-original', 'sov-mainnet', 'launch-large']);
+
+interface SlabParseJob {
+  pubkey: string;
+  programId: string;
+  network: 'devnet' | 'mainnet';
+  vaultPubkey: string;
+  collateralMint: string;
+}
 
 export async function GET() {
   try {
@@ -53,20 +70,9 @@ export async function GET() {
       activeSlabs += p.activeSlabCount;
     }
 
-    // Parse positions from small programs for position breakdown
-    let activeLongs = 0;
-    let activeShorts = 0;
-    let flatAccounts = 0;
-    let parsedAccountCount = 0;
+    // Collect slab parse jobs from programs we want full position data for
+    const slabJobs: SlabParseJob[] = [];
     let unparsedAccountCount = 0;
-
-    // Collect unique wallet owners
-    const uniqueOwners = new Set<string>();
-    const SYSTEM_PROGRAM = '11111111111111111111111111111111';
-    const ZERO_ADDRESS = '11111111111111111111111111111111111111111111';
-
-    // Collect all slab parse jobs with hints (skip expensive resolveSlabProgram)
-    const slabJobs: { pubkey: string; programId: string; network: 'devnet' | 'mainnet' }[] = [];
 
     for (const program of radar.programs) {
       if (PARSE_PROGRAMS.has(program.id) && program.slabs.length > 0) {
@@ -75,63 +81,124 @@ export async function GET() {
           .slice(0, 5);
 
         for (const slab of slabsToParse) {
-          slabJobs.push({ pubkey: slab.pubkey, programId: program.programId, network: program.network });
+          slabJobs.push({
+            pubkey: slab.pubkey,
+            programId: program.programId,
+            network: program.network,
+            vaultPubkey: slab.vaultPubkey,
+            collateralMint: slab.collateralMint,
+          });
         }
       } else {
         unparsedAccountCount += program.accountCount;
       }
     }
 
-    // Parse all slabs in parallel batches of 5 (with hints to skip resolution)
-    // Collect raw TVL entries for batch mint resolution after
-    const rawTvlEntries: { mint: string; network: string; amount: number }[] = [];
+    // ── BATCH FETCH: all RPC + mint resolution in parallel ─────────────
 
-    for (let i = 0; i < slabJobs.length; i += 5) {
-      const batch = slabJobs.slice(i, i + 5);
-      const results = await Promise.allSettled(
-        batch.map(job =>
-          getSlabMarketData(job.pubkey, { programId: job.programId, network: job.network })
-        ),
-      );
+    const devnetJobs = slabJobs.filter(j => j.network === 'devnet');
+    const mainnetJobs = slabJobs.filter(j => j.network === 'mainnet');
+    const devnetConn = getNetworkConnection('devnet');
+    const mainnetConn = getNetworkConnection('mainnet');
 
-      for (const result of results) {
-        if (result.status !== 'fulfilled') continue;
-        const detail = result.value;
-        parsedAccountCount += detail.positions.length;
+    // Collect all collateral mints from radar data (no RPC needed)
+    const allDevnetMints = [...new Set(devnetJobs.map(j => j.collateralMint).filter(Boolean))];
+    const allMainnetMints = [...new Set(mainnetJobs.map(j => j.collateralMint).filter(Boolean))];
 
-        for (const pos of detail.positions) {
-          if (pos.side === 'long') activeLongs++;
-          else if (pos.side === 'short') activeShorts++;
-          else flatAccounts++;
-
-          // Collect unique wallet owners
-          if (pos.owner && pos.owner !== SYSTEM_PROGRAM && pos.owner !== ZERO_ADDRESS && !pos.owner.startsWith('1111111')) {
-            uniqueOwners.add(pos.owner);
-          }
-        }
-
-        rawTvlEntries.push({
-          mint: detail.config.collateralMint,
-          network: detail.network,
-          amount: detail.vaultBalanceSol,
-        });
-      }
-    }
-
-    // Batch-resolve collateral mint symbols from Metaplex metadata
-    const devnetMints = [...new Set(rawTvlEntries.filter(e => e.network === 'devnet').map(e => e.mint))];
-    const mainnetMints = [...new Set(rawTvlEntries.filter(e => e.network === 'mainnet').map(e => e.mint))];
-
-    const [devnetSymbols, mainnetSymbols] = await Promise.all([
-      devnetMints.length > 0
-        ? resolveMintSymbolsBatch(devnetMints, getNetworkConnection('devnet'))
+    const [
+      devnetSlabData,
+      mainnetSlabData,
+      devnetVaults,
+      mainnetVaults,
+      devnetSymbols,
+      mainnetSymbols,
+    ] = await Promise.all([
+      // Slab account data — batch getMultipleAccountsInfo
+      devnetJobs.length > 0
+        ? batchFetchAccounts(devnetConn, devnetJobs.map(j => new PublicKey(j.pubkey)), 10)
+        : Promise.resolve([] as (Buffer | null)[]),
+      mainnetJobs.length > 0
+        ? batchFetchAccounts(mainnetConn, mainnetJobs.map(j => new PublicKey(j.pubkey)), 10)
+        : Promise.resolve([] as (Buffer | null)[]),
+      // Vault balances — parallel getTokenAccountBalance
+      devnetJobs.length > 0
+        ? batchFetchVaultBalances(devnetConn, devnetJobs.map(j => new PublicKey(j.vaultPubkey)), 10)
+        : Promise.resolve([] as (number | null)[]),
+      mainnetJobs.length > 0
+        ? batchFetchVaultBalances(mainnetConn, mainnetJobs.map(j => new PublicKey(j.vaultPubkey)), 10)
+        : Promise.resolve([] as (number | null)[]),
+      // Mint symbols — Jupiter + Metaplex
+      allDevnetMints.length > 0
+        ? resolveMintSymbolsBatch(allDevnetMints, devnetConn)
         : Promise.resolve(new Map<string, string>()),
-      mainnetMints.length > 0
-        ? resolveMintSymbolsBatch(mainnetMints, getNetworkConnection('mainnet'))
+      allMainnetMints.length > 0
+        ? resolveMintSymbolsBatch(allMainnetMints, mainnetConn)
         : Promise.resolve(new Map<string, string>()),
     ]);
 
-    // Build TVL by token using resolved symbols
+    // ── PARSE: all CPU, no RPC ──────────────────────────────────────────
+
+    let activeLongs = 0;
+    let activeShorts = 0;
+    let flatAccounts = 0;
+    let parsedAccountCount = 0;
+
+    const uniqueOwners = new Set<string>();
+    const SYSTEM_PROGRAM = '11111111111111111111111111111111';
+    const ZERO_ADDRESS = '11111111111111111111111111111111111111111111';
+
+    const rawTvlEntries: { mint: string; network: string; amount: number }[] = [];
+
+    // Helper to process a batch of slabs from one network
+    function processSlabBatch(
+      jobs: SlabParseJob[],
+      slabDataArr: (Buffer | null)[],
+      vaultBalances: (number | null)[],
+    ) {
+      for (let i = 0; i < jobs.length; i++) {
+        const data = slabDataArr[i];
+        if (!data) continue;
+
+        try {
+          const config = parseConfig(data);
+          const allAccounts = parseAllAccounts(data);
+
+          parsedAccountCount += allAccounts.length;
+
+          for (const { account } of allAccounts) {
+            const isLP = account.kind === AccountKind.LP;
+
+            if (account.positionSize === 0n) {
+              flatAccounts++;
+            } else if (account.positionSize > 0n) {
+              if (!isLP) activeShorts++; // inverted market
+            } else {
+              if (!isLP) activeLongs++;
+            }
+
+            // Collect unique wallet owners
+            const ownerStr = account.owner.toBase58();
+            if (ownerStr !== SYSTEM_PROGRAM && ownerStr !== ZERO_ADDRESS && !ownerStr.startsWith('1111111')) {
+              uniqueOwners.add(ownerStr);
+            }
+          }
+
+          rawTvlEntries.push({
+            mint: config.collateralMint.toBase58(),
+            network: jobs[i].network,
+            amount: vaultBalances[i] ?? 0,
+          });
+        } catch (err) {
+          console.warn(`[ecosystem] Failed to parse slab ${jobs[i].pubkey}:`, err);
+        }
+      }
+    }
+
+    processSlabBatch(devnetJobs, devnetSlabData, devnetVaults);
+    processSlabBatch(mainnetJobs, mainnetSlabData, mainnetVaults);
+
+    // ── ENRICH: apply resolved symbols ──────────────────────────────────
+
     const tvlByToken: Record<string, { amount: number; network: string }> = {};
     for (const entry of rawTvlEntries) {
       const symbolMap = entry.network === 'devnet' ? devnetSymbols : mainnetSymbols;

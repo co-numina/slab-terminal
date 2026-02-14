@@ -81,7 +81,7 @@ function MarketBlock({ market, isHero }: { market: TopMarket; isHero: boolean })
         borderColor,
         backgroundColor: hasPositions ? "rgba(0, 255, 65, 0.02)" : "transparent",
       }}
-      onClick={() => navigateToSlab(market.slabAddress, market.program, market.network)}
+      onClick={() => navigateToSlab(market.slabAddress, market.program, market.network, market.programId)}
     >
       <div className="flex items-center gap-1">
         <span className="text-[10px] font-bold text-[var(--terminal-cyan)] group-hover:text-[var(--terminal-green)] transition-colors font-mono">

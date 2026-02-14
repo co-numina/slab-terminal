@@ -63,11 +63,12 @@ function buildBlocks(markets: TopMarket[]): Map<string, SlabBlock[]> {
   return groups
 }
 
-function ProgramRow({ label, blocks, network, summary }: {
+function ProgramRow({ label, blocks, network, summary, programId }: {
   label: string
   blocks: SlabBlock[]
   network: "devnet" | "mainnet"
   summary: ProgramSummary | undefined
+  programId: string
 }) {
   const { navigateToSlab } = useNavigation()
   const totalSlabs = summary?.slabCount ?? blocks.length
@@ -97,7 +98,7 @@ function ProgramRow({ label, blocks, network, summary }: {
                 key={i}
                 style={{ color: utilizationColor(pct), cursor: "pointer" }}
                 title={`${block.address.slice(0, 8)}... ${block.used}/${block.max} accts (${pct.toFixed(0)}%)`}
-                onClick={() => navigateToSlab(block.address, label, network)}
+                onClick={() => navigateToSlab(block.address, label, network, programId)}
               >
                 {utilizationChar(pct)}
               </span>
@@ -144,6 +145,7 @@ export function SlabUtilization({ programs }: { programs: ProgramSummary[] }) {
               blocks={displayBlocks}
               network={p.network}
               summary={p}
+              programId={p.programId}
             />
           )
         })}

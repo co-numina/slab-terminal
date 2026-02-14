@@ -388,8 +388,11 @@ function LPRow({ lp, network }: { lp: SlabLP; network: "devnet" | "mainnet" }) {
 // ── Main View ────────────────────────────────────────────────────────────
 
 export function SlabDetailView() {
-  const { selectedSlab, selectedSlabProgram, selectedSlabNetwork } = useNavigation()
-  const { data, isLoading, error } = useSlabDetail(selectedSlab)
+  const { selectedSlab, selectedSlabProgram, selectedSlabProgramId, selectedSlabNetwork } = useNavigation()
+  const { data, isLoading, error } = useSlabDetail(selectedSlab, {
+    programId: selectedSlabProgramId,
+    network: selectedSlabNetwork,
+  })
 
   if (!selectedSlab) {
     return (

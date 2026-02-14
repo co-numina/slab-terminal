@@ -46,7 +46,7 @@ function CriticalRow({ entry }: { entry: LiquidationEntry }) {
   return (
     <div
       className="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-[var(--terminal-hover)] transition-colors px-1"
-      onClick={() => navigateToSlab(entry.slabAddress, entry.programLabel, entry.network)}
+      onClick={() => navigateToSlab(entry.slabAddress, entry.programLabel, entry.network, entry.program)}
     >
       <span
         className="inline-block w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"

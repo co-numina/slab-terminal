@@ -68,14 +68,14 @@ function formatSlabSize(bytes: number): string {
 
 // ── Slab Row ────────────────────────────────────────────────────────────
 
-function SlabRow({ slab, network, programLabel }: { slab: SlabRadar; network: "devnet" | "mainnet"; programLabel: string }) {
+function SlabRow({ slab, network, programLabel, programId }: { slab: SlabRadar; network: "devnet" | "mainnet"; programLabel: string; programId: string }) {
   const color = healthColor(slab.health)
   const { navigateToSlab } = useNavigation()
 
   return (
     <div
       className="flex items-center justify-between py-0.5 px-2 text-[10px] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group"
-      onClick={() => navigateToSlab(slab.pubkey, programLabel, network)}
+      onClick={() => navigateToSlab(slab.pubkey, programLabel, network, programId)}
       title={`Drill into ${slab.pubkey}`}
     >
       <div className="flex items-center gap-2">
@@ -198,7 +198,7 @@ function ProgramCard({ program }: { program: ProgramRadar }) {
             {expanded && (
               <div className="flex flex-col mt-1">
                 {program.slabs.map((slab) => (
-                  <SlabRow key={slab.pubkey} slab={slab} network={program.network} programLabel={program.label} />
+                  <SlabRow key={slab.pubkey} slab={slab} network={program.network} programLabel={program.label} programId={program.programId} />
                 ))}
               </div>
             )}

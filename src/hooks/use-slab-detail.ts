@@ -9,9 +9,24 @@ const fetcher = (url: string) => fetch(url).then((r) => {
 // Re-export types for components
 export type { SlabDetail, SlabPosition, SlabLP }
 
-export function useSlabDetail(address: string | null) {
+interface SlabDetailOpts {
+  programId?: string | null
+  network?: "devnet" | "mainnet" | null
+}
+
+export function useSlabDetail(address: string | null, opts?: SlabDetailOpts) {
+  // Build URL with optional hints to skip expensive program resolution
+  let url: string | null = null
+  if (address) {
+    const params = new URLSearchParams()
+    if (opts?.programId) params.set("programId", opts.programId)
+    if (opts?.network) params.set("network", opts.network)
+    const qs = params.toString()
+    url = `/api/slab/${address}${qs ? `?${qs}` : ""}`
+  }
+
   return useSWR<SlabDetail>(
-    address ? `/api/slab/${address}` : null,
+    url,
     fetcher,
     {
       refreshInterval: 10000,
