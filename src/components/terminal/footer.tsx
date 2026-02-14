@@ -2,7 +2,7 @@ export function Footer() {
   return (
     <footer className="border-t border-[var(--terminal-border)] bg-[var(--terminal-panel)] px-3 py-1.5 text-center">
       <span className="text-[10px]" style={{ color: "#3a4450" }}>
-        SLAB SCOPE v0.3 {"\u2502"} DATA: SOLANA DEVNET + MAINNET {"\u2502"}{" "}
+        SLAB SCOPE v1.0 {"\u2502"} DATA: SOLANA DEVNET + MAINNET {"\u2502"}{" "}
         BUILT ON{" "}
         <a
           href="https://github.com/aeyakovenko/percolator"

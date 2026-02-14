@@ -2,8 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
 
-export type ViewId = "dashboard" | "radar" | "slab"
-// Future: | "markets" | "wallets" | "liquidations"
+export type ViewId = "home" | "radar" | "slab"
 
 interface NavigationContextType {
   activeView: ViewId
@@ -23,19 +22,19 @@ interface NavigationContextType {
 }
 
 const NavigationContext = createContext<NavigationContextType>({
-  activeView: "dashboard",
+  activeView: "home",
   setActiveView: () => {},
   selectedSlab: null,
   selectedSlabProgram: null,
   selectedSlabNetwork: null,
   navigateToSlab: () => {},
   goBack: () => {},
-  previousView: "dashboard",
+  previousView: "home",
 })
 
 export function NavigationProvider({ children }: { children: ReactNode }) {
-  const [activeView, setActiveView] = useState<ViewId>("dashboard")
-  const [previousView, setPreviousView] = useState<ViewId>("dashboard")
+  const [activeView, setActiveView] = useState<ViewId>("home")
+  const [previousView, setPreviousView] = useState<ViewId>("home")
   const [selectedSlab, setSelectedSlab] = useState<string | null>(null)
   const [selectedSlabProgram, setSelectedSlabProgram] = useState<string | null>(null)
   const [selectedSlabNetwork, setSelectedSlabNetwork] = useState<"devnet" | "mainnet" | null>(null)

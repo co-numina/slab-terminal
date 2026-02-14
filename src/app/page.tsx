@@ -3,7 +3,7 @@
 import { NavigationProvider, useNavigation } from "@/hooks/use-navigation"
 import { Header } from "@/components/terminal/header"
 import { Footer } from "@/components/terminal/footer"
-import { DashboardView } from "@/components/terminal/views/dashboard-view"
+import { HomeView } from "@/components/terminal/views/home-view"
 import { RadarView } from "@/components/terminal/views/radar-view"
 import { SlabDetailView } from "@/components/terminal/views/slab-detail-view"
 
@@ -14,9 +14,9 @@ function ViewRouter() {
       return <RadarView />
     case "slab":
       return <SlabDetailView />
-    case "dashboard":
+    case "home":
     default:
-      return <DashboardView />
+      return <HomeView />
   }
 }
 
