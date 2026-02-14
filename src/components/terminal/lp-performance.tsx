@@ -27,8 +27,10 @@ function LPCard({ lp }: { lp: LP }) {
     lp.inventory >= 0 ? "var(--terminal-green)" : "var(--terminal-red)"
   const isPassive = lp.type === "passive"
   const accentColor = isPassive ? "var(--terminal-green)" : "var(--terminal-cyan)"
-  const typeLabel = isPassive ? "PASSIVE" : "vAMM"
   const liquidityNotional = lp.liquidityNotional ?? lp.collateral * (lp.lastOraclePrice ?? 148.55)
+
+  // Use the full label from the API (includes slab context)
+  const displayLabel = lp.label || `LP ${lp.index}`
 
   return (
     <div className="border border-[var(--terminal-border)]">
@@ -37,7 +39,7 @@ function LPCard({ lp }: { lp: LP }) {
         style={{ borderLeft: `2px solid ${accentColor}` }}
       >
         <span className="text-xs font-bold" style={{ color: accentColor }}>
-          LP {lp.index} {"\u2014"} {typeLabel}
+          {displayLabel}
         </span>
       </div>
       <div className="flex flex-col gap-0.5 p-2">
@@ -83,10 +85,10 @@ export function LPPerformance() {
   const lps = data?.lps ?? []
 
   return (
-    <TerminalPanel title="LP Performance" className="h-full">
+    <TerminalPanel title={`LP Performance [${lps.length}]`} className="h-full">
       <div className="flex flex-col gap-2">
         {lps.map((lp) => (
-          <LPCard key={lp.index} lp={lp} />
+          <LPCard key={lp.label || `${lp.index}`} lp={lp} />
         ))}
         {lps.length === 0 && (
           <div className="flex items-center justify-center py-4">

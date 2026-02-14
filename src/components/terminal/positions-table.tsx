@@ -34,36 +34,44 @@ function HealthIndicator({ health }: { health: number }) {
 
 function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }) {
   const isLong = position.side === "long"
+  const isFlat = position.side === "flat"
   const pnlPositive = position.unrealizedPnlPercent >= 0
   const rowBg = isOdd ? "bg-[var(--terminal-row-alt)]" : ""
+
+  const sideColor = isFlat
+    ? "var(--terminal-dim)"
+    : isLong
+      ? "var(--terminal-green)"
+      : "var(--terminal-red)"
+  const sideLabel = isFlat ? "FLAT" : isLong ? "LONG" : "SHORT"
 
   return (
     <tr className={`border-b border-[var(--terminal-border)] transition-colors hover:bg-[var(--terminal-hover)] ${rowBg}`}>
       <td className="px-2 py-1 text-left text-xs text-[var(--terminal-green)]">
         {String(position.accountIndex).padStart(3, "0")}
       </td>
+      <td className="px-2 py-1 text-left text-[9px] text-[var(--terminal-dim)]">
+        {position.slabLabel ?? ""}
+      </td>
       <td className="px-2 py-1 text-left text-xs">
-        <span
-          className="font-bold"
-          style={{ color: isLong ? "var(--terminal-green)" : "var(--terminal-red)" }}
-        >
-          {isLong ? "LONG" : "SHORT"}
+        <span className="font-bold" style={{ color: sideColor }}>
+          {sideLabel}
         </span>
       </td>
       <td className="px-2 py-1 text-right text-xs">
-        <span style={{ color: isLong ? "var(--terminal-green)" : "var(--terminal-red)" }}>
-          {position.size > 0 ? "+" : ""}{position.size.toLocaleString()}
+        <span style={{ color: sideColor }}>
+          {isFlat ? "—" : `${position.size > 0 ? "+" : ""}${position.size.toLocaleString()}`}
         </span>
       </td>
       <td className="px-2 py-1 text-right text-xs text-[var(--terminal-green)]">
-        {position.entryPrice.toFixed(2)}
+        {position.entryPrice > 0 ? position.entryPrice.toFixed(2) : "—"}
       </td>
       <td className="px-2 py-1 text-right text-xs text-[var(--terminal-green)]">
         {position.markPrice.toFixed(2)}
       </td>
       <td className="px-2 py-1 text-right text-xs">
-        <span style={{ color: pnlPositive ? "var(--terminal-green)" : "var(--terminal-red)" }}>
-          {pnlPositive ? "+" : ""}{position.unrealizedPnlPercent.toFixed(2)}%
+        <span style={{ color: isFlat ? "var(--terminal-dim)" : pnlPositive ? "var(--terminal-green)" : "var(--terminal-red)" }}>
+          {isFlat ? "—" : `${pnlPositive ? "+" : ""}${position.unrealizedPnlPercent.toFixed(2)}%`}
         </span>
       </td>
       <td className="px-2 py-1 text-right text-xs text-[var(--terminal-green)]">
@@ -79,15 +87,22 @@ function PositionRow({ position, isOdd }: { position: Position; isOdd: boolean }
 export function PositionsTable() {
   const { data } = usePositions()
   const positions = data?.positions ?? []
-  const sorted = [...positions].sort((a, b) => a.marginHealth - b.marginHealth)
 
-  const totalLong = sorted.filter((p) => p.side === "long").reduce((s, p) => s + p.size, 0)
-  const totalShort = sorted.filter((p) => p.side === "short").reduce((s, p) => s + p.size, 0)
+  // Sort: active positions first (by health), then flat positions
+  const active = positions.filter((p) => p.side !== "flat")
+  const flat = positions.filter((p) => p.side === "flat")
+  const sorted = [
+    ...active.sort((a, b) => a.marginHealth - b.marginHealth),
+    ...flat,
+  ]
+
+  const totalLong = active.filter((p) => p.side === "long").reduce((s, p) => s + p.size, 0)
+  const totalShort = active.filter((p) => p.side === "short").reduce((s, p) => s + p.size, 0)
   const net = totalLong + totalShort
 
   return (
-    <TerminalPanel title={`Active Positions [${positions.length}]`}>
-      {positions.length > 0 && (
+    <TerminalPanel title={`Active Positions [${active.length}/${positions.length}]`}>
+      {active.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-4 border-b border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-2 py-1.5 text-[10px] -mx-3 -mt-2">
           <span className="text-[var(--terminal-dim)]">
             LONGS: <span className="font-bold text-[var(--terminal-green)]">+{totalLong.toLocaleString()}</span>
@@ -100,17 +115,20 @@ export function PositionsTable() {
               {net >= 0 ? "+" : ""}{net.toLocaleString()}
             </span>
           </span>
+          <span className="text-[var(--terminal-dim)]">
+            SLABS: <span className="font-bold text-[var(--terminal-cyan)]">{new Set(positions.map((p) => p.slabLabel)).size}</span>
+          </span>
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px]">
+        <table className="w-full min-w-[700px]">
           <thead>
             <tr className="border-b border-[var(--terminal-border)]">
-              {["IDX", "SIDE", "SIZE", "ENTRY", "MARK", "PNL", "MARGIN", "HEALTH"].map((h) => (
+              {["IDX", "SLAB", "SIDE", "SIZE", "ENTRY", "MARK", "PNL", "MARGIN", "HEALTH"].map((h) => (
                 <th
                   key={h}
                   className={`px-2 py-1 text-[10px] uppercase tracking-wider text-[var(--terminal-dim)] ${
-                    h === "IDX" || h === "SIDE" ? "text-left" : "text-right"
+                    h === "IDX" || h === "SIDE" || h === "SLAB" ? "text-left" : "text-right"
                   }`}
                 >
                   {h}
@@ -120,7 +138,11 @@ export function PositionsTable() {
           </thead>
           <tbody>
             {sorted.map((p, i) => (
-              <PositionRow key={p.accountIndex} position={p} isOdd={i % 2 === 1} />
+              <PositionRow
+                key={`${p.slabLabel ?? ""}-${p.accountIndex}`}
+                position={p}
+                isOdd={i % 2 === 1}
+              />
             ))}
           </tbody>
         </table>

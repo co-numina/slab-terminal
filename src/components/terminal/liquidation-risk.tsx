@@ -51,7 +51,7 @@ export function LiquidationRisk() {
       <div className="flex flex-col gap-0.5">
         {atRisk.map((p) => (
           <HealthBar
-            key={p.accountIndex}
+            key={`${p.slabLabel ?? ""}-${p.accountIndex}`}
             index={p.accountIndex}
             health={p.marginHealth}
           />

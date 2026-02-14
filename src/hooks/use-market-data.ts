@@ -15,10 +15,14 @@ export interface MarketData {
   maintenanceMarginBps: number
   initialMarginBps: number
   tradingFeeBps: number
+  numSlabs: number
+  numAccounts: number
 }
 
 export interface Position {
   accountIndex: number
+  slabPubkey: string
+  slabLabel: string
   side: "long" | "short" | "flat"
   size: number
   entryPrice: number
@@ -36,6 +40,8 @@ export interface LP {
   index: number
   type: string
   label: string
+  slabPubkey: string
+  slabLabel: string
   collateral: number
   spreadBps: number
   tradingFeeBps: number

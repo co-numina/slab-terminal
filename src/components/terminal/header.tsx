@@ -9,9 +9,19 @@ const ASCII_LOGO = `███████╗██╗     ███████�
 ███████║███████╗██║  ██║██████╔╝
 ╚══════╝╚══════╝╚═╝  ╚═╝╚═════╝ `
 
-function crankColor(seconds: number): string {
+function formatCrankAge(slotDiff: number): string {
+  // Solana slots are ~0.4s each
+  const seconds = Math.round(slotDiff * 0.4)
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+  return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`
+}
+
+function crankColor(slotDiff: number): string {
+  const seconds = slotDiff * 0.4
   if (seconds < 30) return "var(--terminal-green)"
-  if (seconds <= 60) return "var(--terminal-amber)"
+  if (seconds <= 120) return "var(--terminal-amber)"
   return "var(--terminal-red)"
 }
 
@@ -24,6 +34,7 @@ export function Header() {
   const slot = data?.slot ?? 0
   const lastCrankSlot = data?.lastCrankSlot ?? 0
   const crankAgo = slot - lastCrankSlot
+  const numSlabs = data?.numSlabs ?? 0
 
   return (
     <header className="border-b border-[var(--terminal-border)] bg-[var(--terminal-panel)]">
@@ -90,10 +101,22 @@ export function Header() {
               LAST CRANK
             </span>
             <span className="text-xs" style={{ color: crankColor(crankAgo) }}>
-              {crankAgo}s
+              {formatCrankAge(crankAgo)}
             </span>
             <span className="text-[10px] text-[var(--terminal-dim)]">ago</span>
           </div>
+
+          {/* Slab count */}
+          {numSlabs > 0 && (
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[10px] uppercase text-[var(--terminal-dim)]">
+                SLABS
+              </span>
+              <span className="text-xs text-[var(--terminal-cyan)]">
+                {numSlabs}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </header>

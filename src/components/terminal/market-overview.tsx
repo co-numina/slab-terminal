@@ -32,6 +32,12 @@ function Divider() {
   return <div className="my-0.5 border-t border-[var(--terminal-border)]" />
 }
 
+function formatSol(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M SOL`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K SOL`
+  return `${value.toFixed(2)} SOL`
+}
+
 export function MarketOverview() {
   const { data, isLoading, error } = useMarketData()
 
@@ -59,13 +65,13 @@ export function MarketOverview() {
       <div className="flex flex-col">
         <DataRow
           label="TVL"
-          value={`${(data?.tvl ?? 0).toFixed(2)} SOL`}
+          value={formatSol(data?.tvl ?? 0)}
           trend="up"
         />
         <Divider />
         <DataRow
           label="Insurance Fund"
-          value={`${(data?.insuranceFund ?? 0).toFixed(2)} SOL`}
+          value={formatSol(data?.insuranceFund ?? 0)}
           trend="up"
         />
         <Divider />
