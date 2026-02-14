@@ -2,9 +2,9 @@
 
 import { useEcosystem } from "@/hooks/use-ecosystem"
 import { EcosystemOverview } from "../home/ecosystem-overview"
+import { ProgramStatus } from "../home/program-status"
 import { TVLDistribution } from "../home/tvl-distribution"
 import { PositionBalance } from "../home/position-balance"
-import { CrankHeartbeat } from "../home/crank-heartbeat"
 import { TopMarkets } from "../home/top-markets"
 import { SlabUtilization } from "../home/slab-utilization"
 import { LiquidationWatch } from "../home/liquidation-watch"
@@ -30,51 +30,51 @@ export function HomeView() {
 
   return (
     <div className="flex flex-col gap-px">
-      {/* Row 1: Ecosystem Overview — stat cards */}
-      {data ? <EcosystemOverview data={data} /> : <PanelSkeleton title="Ecosystem Overview" />}
+      {/* Row 1: Ecosystem Overview + Program Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
+        {data ? <EcosystemOverview data={data} /> : <PanelSkeleton title="Ecosystem Overview" />}
+        {data ? (
+          <ProgramStatus programs={data.programSummaries} />
+        ) : (
+          <PanelSkeleton title="Program Status" />
+        )}
+      </div>
 
-      {/* Row 2: TVL Distribution Bar + Position Balance Gauge (thin visual row) */}
+      {/* Row 2: TVL Distribution Bar + Position Balance Gauge */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
         {data ? <TVLDistribution data={data} /> : <PanelSkeleton title="TVL Distribution" />}
         {data ? <PositionBalance data={data} /> : <PanelSkeleton title="Ecosystem Sentiment" />}
       </div>
 
-      {/* Row 3: Crank Heartbeat + Top Markets */}
+      {/* Row 3: Top Markets + Slab Utilization */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
-        {data ? (
-          <CrankHeartbeat programs={data.programSummaries} />
-        ) : (
-          <PanelSkeleton title="Crank Heartbeat" />
-        )}
         <TopMarkets />
-      </div>
-
-      {/* Row 4: Slab Utilization + Liquidation Watchlist */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
         {data ? (
           <SlabUtilization programs={data.programSummaries} />
         ) : (
           <PanelSkeleton title="Slab Utilization" />
         )}
-        <LiquidationWatch />
       </div>
 
-      {/* Row 5: Insurance Reserves + Network Breakdown */}
+      {/* Row 4: Liquidation Watchlist + Insurance Reserves */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
+        <LiquidationWatch />
         {data ? (
           <InsuranceReserves programs={data.programSummaries} />
         ) : (
           <PanelSkeleton title="Insurance Reserves" />
         )}
+      </div>
+
+      {/* Row 5: Network Breakdown + Market Treemap */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-px">
         {data ? (
           <NetworkBreakdown data={data} />
         ) : (
           <PanelSkeleton title="Network Breakdown" />
         )}
+        <MarketTreemap />
       </div>
-
-      {/* Row 6: Market Treemap (full width) */}
-      <MarketTreemap />
     </div>
   )
 }
