@@ -23,10 +23,10 @@ export function ExplorerLink({
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className={`text-[var(--terminal-cyan)] hover:text-[var(--terminal-green)] text-[9px] opacity-40 hover:opacity-100 transition-opacity ${className}`}
+      className={`inline-flex items-center gap-0.5 text-[var(--terminal-cyan)] hover:text-[var(--terminal-green)] text-[9px] opacity-80 hover:opacity-100 transition-all hover:underline ${className}`}
       title={`View on Solana Explorer: ${address.slice(0, 8)}...`}
     >
-      {label || "\u2197"}
+      {label || "[EXPLORE]"}
     </a>
   )
 }
