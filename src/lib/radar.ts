@@ -87,9 +87,26 @@ function computeHealth(
 const RADAR_CACHE_KEY = 'radar_ecosystem';
 const RADAR_CACHE_MS = 30_000; // 30s cache
 
+// In-flight deduplication: when multiple API routes call scanEcosystem()
+// simultaneously on cold start, they share the same promise instead of
+// each triggering a separate scan.
+let inflight: Promise<EcosystemRadar> | null = null;
+
 export async function scanEcosystem(): Promise<EcosystemRadar> {
   const cached = getCached<EcosystemRadar>(RADAR_CACHE_KEY, RADAR_CACHE_MS);
   if (cached) return cached;
+
+  // Deduplicate concurrent calls
+  if (inflight) return inflight;
+  inflight = _scanEcosystemImpl();
+  try {
+    return await inflight;
+  } finally {
+    inflight = null;
+  }
+}
+
+async function _scanEcosystemImpl(): Promise<EcosystemRadar> {
 
   const scanStart = Date.now();
   const programs: ProgramRadarEntry[] = [];

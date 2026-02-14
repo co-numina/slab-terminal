@@ -139,8 +139,9 @@ export async function discoverSlabsForProgram(
   const programPubkey = new PublicKey(entry.programId);
   const allCandidates: DiscoveredSlab[] = [];
 
-  for (const slabSize of entry.slabSizes) {
-    try {
+  // Fetch all slab sizes in parallel (was sequential)
+  const sizeResults = await Promise.allSettled(
+    entry.slabSizes.map(async (slabSize) => {
       const accounts = await connection.getProgramAccounts(programPubkey, {
         filters: [{ dataSize: slabSize }],
         dataSlice: {
@@ -148,29 +149,35 @@ export async function discoverSlabsForProgram(
           length: Math.min(1314, slabSize), // Don't request more than slab size
         },
       });
+      return { slabSize, accounts };
+    }),
+  );
 
-      for (const { pubkey, account } of accounts) {
-        const data = Buffer.from(account.data);
-        const parsed = parseSlabHeader(pubkey, data);
-        if (!parsed) continue;
+  for (const result of sizeResults) {
+    if (result.status === 'rejected') {
+      console.warn(`[discovery] Failed for ${entry.id}:`, result.reason);
+      continue;
+    }
 
-        // For radar, include all slabs (even empty ones) for count tracking
-        allCandidates.push({
-          pubkey,
-          label: '',
-          numUsedAccounts: parsed.numUsedAccounts,
-          lastCrankSlot: parsed.lastCrankSlot,
-          vaultPubkey: parsed.vaultPubkey,
-          collateralMint: parsed.collateralMint,
-          programId: entry.programId,
-          programLabel: entry.label,
-          network: entry.network,
-          slabSize,
-        });
-      }
-    } catch (error) {
-      console.warn(`[discovery] Failed for ${entry.id} slabSize=${slabSize}:`, error);
-      // Continue with next size — graceful degradation
+    const { slabSize, accounts } = result.value;
+    for (const { pubkey, account } of accounts) {
+      const data = Buffer.from(account.data);
+      const parsed = parseSlabHeader(pubkey, data);
+      if (!parsed) continue;
+
+      // For radar, include all slabs (even empty ones) for count tracking
+      allCandidates.push({
+        pubkey,
+        label: '',
+        numUsedAccounts: parsed.numUsedAccounts,
+        lastCrankSlot: parsed.lastCrankSlot,
+        vaultPubkey: parsed.vaultPubkey,
+        collateralMint: parsed.collateralMint,
+        programId: entry.programId,
+        programLabel: entry.label,
+        network: entry.network,
+        slabSize,
+      });
     }
   }
 
