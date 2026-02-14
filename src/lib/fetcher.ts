@@ -43,7 +43,7 @@ const ALL_CACHE_KEY = 'allMarketData';
  * Solana RPC supports up to 100 accounts per call.
  * Returns results in same order as input pubkeys (null for failures).
  */
-async function batchFetchAccounts(
+export async function batchFetchAccounts(
   connection: Connection,
   pubkeys: PublicKey[],
   batchSize = 10,
@@ -79,7 +79,7 @@ async function batchFetchAccounts(
 /**
  * Batch-fetch token account balances in sequential groups to avoid rate limiting.
  */
-async function batchFetchVaultBalances(
+export async function batchFetchVaultBalances(
   connection: Connection,
   vaultPubkeys: PublicKey[],
   batchSize = 5,

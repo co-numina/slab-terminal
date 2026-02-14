@@ -20,6 +20,7 @@ export interface DiscoveredSlab {
   numUsedAccounts: number;
   lastCrankSlot: bigint;
   vaultPubkey: PublicKey;
+  collateralMint?: PublicKey;  // extracted from header for early mint resolution
   // Extended fields for multi-program scanning
   programId?: string;
   programLabel?: string;
@@ -32,7 +33,7 @@ export interface DiscoveredSlab {
 function parseSlabHeader(
   pubkey: PublicKey,
   data: Buffer,
-): { numUsedAccounts: number; lastCrankSlot: bigint; vaultPubkey: PublicKey } | null {
+): { numUsedAccounts: number; lastCrankSlot: bigint; vaultPubkey: PublicKey; collateralMint: PublicKey } | null {
   if (data.length < 1314) return null;
 
   // Validate magic
@@ -41,9 +42,11 @@ function parseSlabHeader(
 
   const numUsedAccounts = data.readUInt16LE(1312);
   const lastCrankSlot = data.readBigUInt64LE(624);
+  // Config section: collateralMint at offset 72-104, vaultPubkey at offset 104-136
+  const collateralMint = new PublicKey(data.subarray(72, 104));
   const vaultPubkey = new PublicKey(data.subarray(104, 136));
 
-  return { numUsedAccounts, lastCrankSlot, vaultPubkey };
+  return { numUsedAccounts, lastCrankSlot, vaultPubkey, collateralMint };
 }
 
 // ── Original single-program discovery (unchanged behavior) ──────────────
@@ -91,6 +94,7 @@ export async function discoverAllSlabs(connection: Connection): Promise<Discover
         numUsedAccounts: parsed.numUsedAccounts,
         lastCrankSlot: parsed.lastCrankSlot,
         vaultPubkey: parsed.vaultPubkey,
+        collateralMint: parsed.collateralMint,
       });
     }
 
@@ -157,6 +161,7 @@ export async function discoverSlabsForProgram(
           numUsedAccounts: parsed.numUsedAccounts,
           lastCrankSlot: parsed.lastCrankSlot,
           vaultPubkey: parsed.vaultPubkey,
+          collateralMint: parsed.collateralMint,
           programId: entry.programId,
           programLabel: entry.label,
           network: entry.network,

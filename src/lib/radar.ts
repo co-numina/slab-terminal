@@ -3,6 +3,8 @@
  *
  * Scans ALL known Percolator programs across devnet + mainnet.
  * Produces health-scored ecosystem overview with per-program stats.
+ *
+ * Performance: parallel slot fetches + parallel program discovery per network.
  */
 import { getCached, setCache } from './connection';
 import { getNetworkConnection, getNetworkSlot } from './connections';
@@ -22,6 +24,7 @@ export interface SlabRadarEntry {
   lastCrankSlot: number;
   lastCrankAge: number;       // seconds since last crank
   vaultPubkey: string;
+  collateralMint: string;     // extracted from header for early mint resolution
   health: HealthStatus;
 }
 
@@ -58,6 +61,7 @@ export interface EcosystemRadar {
     slabs: number;
     accounts: number;
   }>;
+  networkSlots: Record<NetworkId, number>;  // expose slots for reuse by top-markets
   scanTimestamp: string;
   scanDurationMs: number;
 }
@@ -90,69 +94,43 @@ export async function scanEcosystem(): Promise<EcosystemRadar> {
   const scanStart = Date.now();
   const programs: ProgramRadarEntry[] = [];
 
-  // Get current slot per network (for crank age calculation)
+  // Get current slot per network — PARALLEL (was sequential)
   const networkSlots = new Map<NetworkId, number>();
-  for (const network of getAllNetworks()) {
-    try {
-      const slot = await getNetworkSlot(network);
-      networkSlots.set(network, slot);
-    } catch (err) {
-      console.warn(`[radar] Failed to get slot for ${network}:`, err);
-      networkSlots.set(network, 0);
-    }
+  const slotResults = await Promise.all(
+    getAllNetworks().map(async (network) => {
+      try {
+        const slot = await getNetworkSlot(network);
+        return [network, slot] as const;
+      } catch (err) {
+        console.warn(`[radar] Failed to get slot for ${network}:`, err);
+        return [network, 0] as const;
+      }
+    }),
+  );
+  for (const [network, slot] of slotResults) {
+    networkSlots.set(network, slot);
   }
 
-  // Scan each program sequentially per network to respect rate limits
+  // Scan programs — PARALLEL per network (was fully sequential)
   for (const network of getAllNetworks()) {
     const entries = getRegistryByNetwork(network);
     const connection = getNetworkConnection(network);
     const currentSlot = networkSlots.get(network) ?? 0;
 
-    for (const entry of entries) {
-      try {
+    // Discover all programs on this network in parallel
+    const discoveryResults = await Promise.allSettled(
+      entries.map(async (entry) => {
         const slabs = await discoverSlabsForProgram(connection, entry);
+        return { entry, slabs };
+      }),
+    );
 
-        // Build per-slab entries
-        const slabEntries: SlabRadarEntry[] = slabs.map((s) => {
-          const lastCrank = Number(s.lastCrankSlot);
-          const crankAge = currentSlot > 0 ? (currentSlot - lastCrank) * 0.4 : 0;
-          return {
-            pubkey: s.pubkey.toBase58(),
-            label: s.label,
-            slabSize: s.slabSize ?? 0,
-            numUsedAccounts: s.numUsedAccounts,
-            lastCrankSlot: lastCrank,
-            lastCrankAge: Math.round(crankAge),
-            vaultPubkey: s.vaultPubkey.toBase58(),
-            health: computeHealth(lastCrank, currentSlot, s.numUsedAccounts),
-          };
-        });
-
-        // Aggregate program-level stats
-        const accountCount = slabs.reduce((s, sl) => s + sl.numUsedAccounts, 0);
-        const activeSlabCount = slabEntries.filter((s) => s.numUsedAccounts > 0).length;
-        const mostRecentCrank = slabEntries.reduce(
-          (max, s) => Math.max(max, s.lastCrankSlot),
-          0,
-        );
-        const crankAge = currentSlot > 0 ? (currentSlot - mostRecentCrank) * 0.4 : 0;
-
-        programs.push({
-          id: entry.id,
-          label: entry.label,
-          programId: entry.programId,
-          network: entry.network,
-          description: entry.description,
-          slabCount: slabs.length,
-          activeSlabCount,
-          accountCount,
-          lastCrankSlot: mostRecentCrank,
-          lastCrankAge: Math.round(crankAge),
-          health: computeHealth(mostRecentCrank, currentSlot, accountCount),
-          slabs: slabEntries,
-        });
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+    for (const result of discoveryResults) {
+      if (result.status === 'rejected') {
+        // Find which entry failed — use index
+        const idx = discoveryResults.indexOf(result);
+        const entry = entries[idx];
+        const errMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
         console.warn(`[radar] Failed to scan ${entry.id}:`, errMsg);
         programs.push({
           id: entry.id,
@@ -169,7 +147,51 @@ export async function scanEcosystem(): Promise<EcosystemRadar> {
           slabs: [],
           error: errMsg,
         });
+        continue;
       }
+
+      const { entry, slabs } = result.value;
+
+      // Build per-slab entries
+      const slabEntries: SlabRadarEntry[] = slabs.map((s) => {
+        const lastCrank = Number(s.lastCrankSlot);
+        const crankAge = currentSlot > 0 ? (currentSlot - lastCrank) * 0.4 : 0;
+        return {
+          pubkey: s.pubkey.toBase58(),
+          label: s.label,
+          slabSize: s.slabSize ?? 0,
+          numUsedAccounts: s.numUsedAccounts,
+          lastCrankSlot: lastCrank,
+          lastCrankAge: Math.round(crankAge),
+          vaultPubkey: s.vaultPubkey.toBase58(),
+          collateralMint: s.collateralMint?.toBase58() ?? '',
+          health: computeHealth(lastCrank, currentSlot, s.numUsedAccounts),
+        };
+      });
+
+      // Aggregate program-level stats
+      const accountCount = slabs.reduce((s, sl) => s + sl.numUsedAccounts, 0);
+      const activeSlabCount = slabEntries.filter((s) => s.numUsedAccounts > 0).length;
+      const mostRecentCrank = slabEntries.reduce(
+        (max, s) => Math.max(max, s.lastCrankSlot),
+        0,
+      );
+      const crankAge = currentSlot > 0 ? (currentSlot - mostRecentCrank) * 0.4 : 0;
+
+      programs.push({
+        id: entry.id,
+        label: entry.label,
+        programId: entry.programId,
+        network: entry.network,
+        description: entry.description,
+        slabCount: slabs.length,
+        activeSlabCount,
+        accountCount,
+        lastCrankSlot: mostRecentCrank,
+        lastCrankAge: Math.round(crankAge),
+        health: computeHealth(mostRecentCrank, currentSlot, accountCount),
+        slabs: slabEntries,
+      });
     }
   }
 
@@ -197,10 +219,17 @@ export async function scanEcosystem(): Promise<EcosystemRadar> {
     n.accounts += p.accountCount;
   }
 
+  // Expose slots for reuse by top-markets (avoids re-fetching)
+  const networkSlotsRecord: Record<NetworkId, number> = {
+    devnet: networkSlots.get('devnet') ?? 0,
+    mainnet: networkSlots.get('mainnet') ?? 0,
+  };
+
   const result: EcosystemRadar = {
     programs,
     totals,
     networks,
+    networkSlots: networkSlotsRecord,
     scanTimestamp: new Date().toISOString(),
     scanDurationMs: Date.now() - scanStart,
   };

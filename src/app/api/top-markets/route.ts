@@ -2,8 +2,13 @@
  * GET /api/top-markets?limit=10&sort=tvl
  *
  * Returns enriched data for the top N slabs across all programs.
- * Sorts by numUsedAccounts from radar headers, then does full config
- * parse on the top N to get TVL, OI, positions, price, health.
+ * Sorts by numUsedAccounts from radar headers, then does batch slab
+ * parsing to get TVL, OI, positions, price, health.
+ *
+ * Performance: uses getMultipleAccountsInfo() + batch vault balance
+ * fetches instead of per-slab getAccountInfo() calls. Reuses radar
+ * slots instead of fetching getSlot() per slab.
+ * Runs mint resolution + DexScreener in parallel with slab fetches.
  *
  * Enrichment:
  *   - Mint symbols via Jupiter + Metaplex
@@ -11,37 +16,31 @@
  *   - Oracle mode detection (admin / pyth / dex)
  *   - Insurance fund + lifetime liquidation stats
  *
- * Cache: 60s — full slab parses are expensive.
+ * Cache: 60s
  */
+import { PublicKey } from '@solana/web3.js';
 import { NextResponse } from 'next/server';
 import { getCached, setCache } from '@/lib/connection';
 import { scanEcosystem } from '@/lib/radar';
-import { getSlabMarketData, type SlabDetail } from '@/lib/fetcher';
+import { batchFetchAccounts, batchFetchVaultBalances } from '@/lib/fetcher';
+import { parseConfig, parseParams, parseEngine, parseAllAccounts, calculateFundingRate, computeMarginMetrics } from '@/lib/percolator';
+import { getEffectiveOraclePrice } from '@/lib/oracle';
 import { resolveMintSymbol, resolveMintSymbolsBatch } from '@/lib/known-mints';
 import { getNetworkConnection } from '@/lib/connections';
 import { fetchTokenPricesBatch } from '@/lib/dexscreener';
+import type { NetworkId } from '@/lib/registry';
+import { AccountKind } from '@/lib/types';
 
 const CACHE_KEY = 'top_markets_response';
 const CACHE_MS = 60_000;
 const DEFAULT_LIMIT = 15;
 
-// Known DEX program owners for oracle mode detection
-const DEX_PROGRAMS: Record<string, string> = {
-  'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA': 'dex-pumpswap',
-  'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': 'dex-raydium',
-  'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo': 'dex-meteora',
-};
-
 type OracleMode = 'admin' | 'pyth' | 'dex-pumpswap' | 'dex-raydium' | 'dex-meteora' | 'unknown';
 
 /**
  * Detect oracle mode from the slab's indexFeedId.
- *   - All zeros / default pubkey = admin oracle (price pushed by admin wallet)
- *   - Known DEX program = DEX pool oracle
- *   - Otherwise = Pyth feed
  */
 function detectOracleMode(indexFeedId: string): OracleMode {
-  // Admin oracle: indexFeedId is default pubkey (all 1s = base58 "1111...1111")
   if (
     indexFeedId === '11111111111111111111111111111111' ||
     indexFeedId === 'So11111111111111111111111111111111111111111' ||
@@ -49,11 +48,7 @@ function detectOracleMode(indexFeedId: string): OracleMode {
   ) {
     return 'admin';
   }
-  // DEX oracle: check if the pubkey is a known DEX pool program
-  // (In practice we'd need to fetch the account owner, but for now we use
-  //  the feed ID heuristic — if it's a valid pubkey that's not a Pyth feed hex,
-  //  it's likely a DEX pool. Real detection would need an RPC call.)
-  return 'pyth'; // default assumption for non-admin
+  return 'pyth';
 }
 
 interface MarketEntry {
@@ -85,7 +80,7 @@ interface MarketEntry {
   insurance: {
     balance: number;
     feeRevenue: number;
-    ratio: number; // insurance / OI — 0 if no OI
+    ratio: number;
     health: 'healthy' | 'caution' | 'warning';
   };
   lifetimeLiquidations: number;
@@ -102,78 +97,146 @@ interface MarketEntry {
   slabSize: number;
 }
 
-function buildMarketEntry(detail: SlabDetail, crankAge: number): MarketEntry {
-  const longs = detail.positions.filter(p => p.side === 'long' && !p.isLP);
-  const shorts = detail.positions.filter(p => p.side === 'short' && !p.isLP);
-  const flat = detail.positions.filter(p => p.side === 'flat');
-  const activePositions = longs.length + shorts.length;
+// Slab info extracted from radar (lightweight, no RPC needed)
+interface TopSlabInfo {
+  pubkey: string;
+  programId: string;
+  programLabel: string;
+  network: NetworkId;
+  accounts: number;
+  crankAge: number;
+  vaultPubkey: string;
+  collateralMint: string;
+  slabSize: number;
+}
 
-  // Worst health across all positions
-  let worstHealth = 100;
-  for (const pos of detail.positions) {
-    if (pos.marginHealth < worstHealth) {
-      worstHealth = pos.marginHealth;
+/**
+ * Parse a full slab buffer into a MarketEntry.
+ * Pure CPU operation — no RPC calls.
+ */
+function parseSlabToMarket(
+  slabData: Buffer,
+  info: TopSlabInfo,
+  vaultBalance: number,
+): MarketEntry | null {
+  try {
+    const config = parseConfig(slabData);
+    const params = parseParams(slabData);
+    const engine = parseEngine(slabData);
+    const allAccounts = parseAllAccounts(slabData);
+
+    // Oracle price from slab's last effective price
+    let oraclePriceE6: bigint;
+    let solUsdPrice: number;
+    if (config.lastEffectivePriceE6 > 0n) {
+      oraclePriceE6 = config.lastEffectivePriceE6;
+      solUsdPrice = getEffectiveOraclePrice(config.lastEffectivePriceE6, config.invert);
+    } else {
+      oraclePriceE6 = 0n;
+      solUsdPrice = 0;
     }
+
+    // Funding rate
+    const fundingRate = calculateFundingRate(engine, config, oraclePriceE6);
+
+    // Open interest
+    const oi = oraclePriceE6 > 0n
+      ? Number(engine.totalOpenInterest * oraclePriceE6 / 1_000_000n) / 1e9
+      : 0;
+
+    // Max account capacity
+    const ENGINE_OFF = 392;
+    const ENGINE_ACCOUNTS_OFF = 9136;
+    const ACCOUNT_SIZE = 240;
+    const accountsEnd = slabData.length - ENGINE_OFF - ENGINE_ACCOUNTS_OFF;
+    const maxAccountCapacity = accountsEnd > 0 ? Math.floor(accountsEnd / ACCOUNT_SIZE) : 0;
+
+    // Position breakdown
+    let longsCount = 0;
+    let shortsCount = 0;
+    let flatCount = 0;
+    let worstHealth = 100;
+
+    for (const { account } of allAccounts) {
+      const isLP = account.kind === AccountKind.LP;
+      if (account.positionSize === 0n) {
+        flatCount++;
+      } else if (account.positionSize > 0n) {
+        if (!isLP) shortsCount++; // inverted market
+      } else {
+        if (!isLP) longsCount++;
+      }
+
+      // Compute margin health
+      const metrics = computeMarginMetrics(account, oraclePriceE6, params);
+      if (metrics.health < worstHealth) {
+        worstHealth = metrics.health;
+      }
+    }
+
+    const activePositions = longsCount + shortsCount;
+
+    // Insurance metrics
+    const insuranceBalance = Number(engine.insuranceFund.balance) / 1e9;
+    const insuranceFeeRevenue = Number(engine.insuranceFund.feeRevenue) / 1e9;
+    const insuranceRatio = oi > 0 ? insuranceBalance / oi : 0;
+    const insuranceHealth: 'healthy' | 'caution' | 'warning' =
+      insuranceRatio < 0.02 ? 'warning' : insuranceRatio < 0.05 ? 'caution' : 'healthy';
+
+    // Oracle mode
+    const oracleMode = detectOracleMode(config.indexFeedId.toBase58());
+
+    return {
+      slabAddress: info.pubkey,
+      program: info.programLabel,
+      programId: info.programId,
+      network: info.network,
+      collateralMint: config.collateralMint.toBase58(),
+      collateralSymbol: resolveMintSymbol(config.collateralMint.toBase58()),
+      price: solUsdPrice,
+      priceUsd: 0,
+      tvl: vaultBalance,
+      tvlUsd: 0,
+      openInterest: oi,
+      openInterestUsd: 0,
+      positions: {
+        longs: longsCount,
+        shorts: shortsCount,
+        flat: flatCount,
+        total: allAccounts.length,
+        active: activePositions,
+      },
+      worstHealth,
+      fundingRate: fundingRate.rateBpsPerHour,
+      fundingDirection: fundingRate.direction,
+      lastCrankAge: info.crankAge,
+      status: info.crankAge < 3600 ? 'active' : info.crankAge < 86400 ? 'stale' : 'idle',
+      oracleMode,
+      insurance: {
+        balance: insuranceBalance,
+        feeRevenue: insuranceFeeRevenue,
+        ratio: insuranceRatio,
+        health: insuranceHealth,
+      },
+      lifetimeLiquidations: Number(engine.lifetimeLiquidations),
+      lifetimeForceCloses: Number(engine.lifetimeForceCloses),
+      config: {
+        invert: config.invert,
+        maintMarginBps: Number(params.maintenanceMarginBps),
+        initMarginBps: Number(params.initialMarginBps),
+        tradingFeeBps: Number(params.tradingFeeBps),
+        maxAccounts: maxAccountCapacity,
+        usedAccounts: engine.numUsedAccounts,
+        utilization: maxAccountCapacity > 0
+          ? (engine.numUsedAccounts / maxAccountCapacity) * 100
+          : 0,
+      },
+      slabSize: slabData.length,
+    };
+  } catch (err) {
+    console.warn(`[top-markets] Failed to parse slab ${info.pubkey}:`, err);
+    return null;
   }
-
-  // Insurance metrics
-  const insuranceBalance = detail.insuranceFundSol;
-  const insuranceFeeRevenue = Number(detail.engine.insuranceFeeRevenue) / 1e9;
-  const oi = detail.openInterestSol;
-  const insuranceRatio = oi > 0 ? insuranceBalance / oi : 0;
-  const insuranceHealth: 'healthy' | 'caution' | 'warning' =
-    insuranceRatio < 0.02 ? 'warning' : insuranceRatio < 0.05 ? 'caution' : 'healthy';
-
-  // Oracle mode
-  const oracleMode = detectOracleMode(detail.config.indexFeedId);
-
-  return {
-    slabAddress: detail.slabPubkey,
-    program: detail.programLabel,
-    programId: detail.programId,
-    network: detail.network,
-    collateralMint: detail.config.collateralMint,
-    collateralSymbol: resolveMintSymbol(detail.config.collateralMint),
-    price: detail.solUsdPrice,
-    priceUsd: 0, // filled in by DexScreener pass
-    tvl: detail.vaultBalanceSol,
-    tvlUsd: 0, // filled in by DexScreener pass
-    openInterest: oi,
-    openInterestUsd: 0, // filled in by DexScreener pass
-    positions: {
-      longs: longs.length,
-      shorts: shorts.length,
-      flat: flat.length,
-      total: detail.positions.length,
-      active: activePositions,
-    },
-    worstHealth,
-    fundingRate: detail.fundingRate.rateBpsPerHour,
-    fundingDirection: detail.fundingRate.direction,
-    lastCrankAge: crankAge,
-    status: crankAge < 3600 ? 'active' : crankAge < 86400 ? 'stale' : 'idle',
-    oracleMode,
-    insurance: {
-      balance: insuranceBalance,
-      feeRevenue: insuranceFeeRevenue,
-      ratio: insuranceRatio,
-      health: insuranceHealth,
-    },
-    lifetimeLiquidations: detail.engine.lifetimeLiquidations,
-    lifetimeForceCloses: detail.engine.lifetimeForceCloses,
-    config: {
-      invert: detail.config.invert,
-      maintMarginBps: detail.params.maintenanceMarginBps,
-      initMarginBps: detail.params.initialMarginBps,
-      tradingFeeBps: detail.params.tradingFeeBps,
-      maxAccounts: detail.maxAccountCapacity,
-      usedAccounts: detail.engine.numUsedAccounts,
-      utilization: detail.maxAccountCapacity > 0
-        ? (detail.engine.numUsedAccounts / detail.maxAccountCapacity) * 100
-        : 0,
-    },
-    slabSize: detail.slabSize,
-  };
 }
 
 export async function GET(request: Request) {
@@ -190,8 +253,8 @@ export async function GET(request: Request) {
 
     const radar = await scanEcosystem();
 
-    // Flatten all slabs with their program context, sort by accounts desc
-    const allSlabs: { pubkey: string; programId: string; network: 'devnet' | 'mainnet'; accounts: number; crankAge: number }[] = [];
+    // Flatten all slabs with full context from radar (including vault pubkeys + mints)
+    const allSlabs: TopSlabInfo[] = [];
 
     for (const program of radar.programs) {
       for (const slab of program.slabs) {
@@ -199,9 +262,13 @@ export async function GET(request: Request) {
           allSlabs.push({
             pubkey: slab.pubkey,
             programId: program.programId,
+            programLabel: program.label,
             network: program.network,
             accounts: slab.numUsedAccounts,
             crankAge: slab.lastCrankAge,
+            vaultPubkey: slab.vaultPubkey,
+            collateralMint: slab.collateralMint,
+            slabSize: slab.slabSize,
           });
         }
       }
@@ -210,46 +277,98 @@ export async function GET(request: Request) {
     // Sort by account count desc (proxy for activity/importance)
     allSlabs.sort((a, b) => b.accounts - a.accounts);
 
-    // Take top N and do full parses
+    // Take top N
     const topSlabs = allSlabs.slice(0, limit);
-    const markets: MarketEntry[] = [];
 
-    // Parse in parallel batches of 5 (with hints to skip resolution)
-    for (let i = 0; i < topSlabs.length; i += 5) {
-      const batch = topSlabs.slice(i, i + 5);
-      const results = await Promise.allSettled(
-        batch.map(async (slab) => {
-          const detail = await getSlabMarketData(slab.pubkey, {
-            programId: slab.programId,
-            network: slab.network,
-          });
-          return buildMarketEntry(detail, slab.crankAge);
-        }),
-      );
-
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          markets.push(result.value);
-        }
-      }
+    if (topSlabs.length === 0) {
+      const response = {
+        markets: [],
+        count: 0,
+        totalCandidates: 0,
+        generatedAt: new Date().toISOString(),
+      };
+      setCache(CACHE_KEY, response);
+      return NextResponse.json(response, {
+        headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' },
+      });
     }
 
-    // Batch-resolve collateral mint symbols + USD prices in parallel
-    const allMints = [...new Set(markets.map(m => m.collateralMint))];
-    const devnetMints = [...new Set(markets.filter(m => m.network === 'devnet').map(m => m.collateralMint))];
-    const mainnetMints = [...new Set(markets.filter(m => m.network === 'mainnet').map(m => m.collateralMint))];
+    // ── BATCH FETCH: all RPC + external API calls in parallel ──────────
 
-    const [devnetSymbols, mainnetSymbols, tokenPrices] = await Promise.all([
+    // Group slabs by network for batch RPC calls
+    const devnetSlabs = topSlabs.filter(s => s.network === 'devnet');
+    const mainnetSlabs = topSlabs.filter(s => s.network === 'mainnet');
+    const devnetConn = getNetworkConnection('devnet');
+    const mainnetConn = getNetworkConnection('mainnet');
+
+    // Collect all collateral mints (from radar discovery — no RPC needed)
+    const allMints = [...new Set(topSlabs.map(s => s.collateralMint).filter(Boolean))];
+    const devnetMints = [...new Set(devnetSlabs.map(s => s.collateralMint).filter(Boolean))];
+    const mainnetMints = [...new Set(mainnetSlabs.map(s => s.collateralMint).filter(Boolean))];
+
+    // Fire ALL async operations in parallel:
+    // 1. Batch fetch slab account data (getMultipleAccountsInfo — 1-2 RPC calls)
+    // 2. Batch fetch vault balances (parallel getTokenAccountBalance — grouped)
+    // 3. Resolve mint symbols (Jupiter + Metaplex)
+    // 4. Fetch DexScreener USD prices
+    const [
+      devnetSlabData,
+      mainnetSlabData,
+      devnetVaults,
+      mainnetVaults,
+      devnetSymbols,
+      mainnetSymbols,
+      tokenPrices,
+    ] = await Promise.all([
+      // Slab account data
+      devnetSlabs.length > 0
+        ? batchFetchAccounts(devnetConn, devnetSlabs.map(s => new PublicKey(s.pubkey)), 10)
+        : Promise.resolve([] as (Buffer | null)[]),
+      mainnetSlabs.length > 0
+        ? batchFetchAccounts(mainnetConn, mainnetSlabs.map(s => new PublicKey(s.pubkey)), 10)
+        : Promise.resolve([] as (Buffer | null)[]),
+      // Vault balances
+      devnetSlabs.length > 0
+        ? batchFetchVaultBalances(devnetConn, devnetSlabs.map(s => new PublicKey(s.vaultPubkey)), 10)
+        : Promise.resolve([] as (number | null)[]),
+      mainnetSlabs.length > 0
+        ? batchFetchVaultBalances(mainnetConn, mainnetSlabs.map(s => new PublicKey(s.vaultPubkey)), 10)
+        : Promise.resolve([] as (number | null)[]),
+      // Mint symbols
       devnetMints.length > 0
-        ? resolveMintSymbolsBatch(devnetMints, getNetworkConnection('devnet'))
+        ? resolveMintSymbolsBatch(devnetMints, devnetConn)
         : Promise.resolve(new Map<string, string>()),
       mainnetMints.length > 0
-        ? resolveMintSymbolsBatch(mainnetMints, getNetworkConnection('mainnet'))
+        ? resolveMintSymbolsBatch(mainnetMints, mainnetConn)
         : Promise.resolve(new Map<string, string>()),
+      // DexScreener USD prices
       fetchTokenPricesBatch(allMints),
     ]);
 
-    // Apply resolved symbols + USD prices back to markets
+    // ── PARSE: all CPU, no RPC ──────────────────────────────────────────
+
+    const markets: MarketEntry[] = [];
+
+    // Parse devnet slabs
+    for (let i = 0; i < devnetSlabs.length; i++) {
+      const slabData = devnetSlabData[i];
+      if (!slabData) continue;
+      const vaultBalance = devnetVaults[i] ?? 0;
+      const entry = parseSlabToMarket(slabData, devnetSlabs[i], vaultBalance);
+      if (entry) markets.push(entry);
+    }
+
+    // Parse mainnet slabs
+    for (let i = 0; i < mainnetSlabs.length; i++) {
+      const slabData = mainnetSlabData[i];
+      if (!slabData) continue;
+      const vaultBalance = mainnetVaults[i] ?? 0;
+      const entry = parseSlabToMarket(slabData, mainnetSlabs[i], vaultBalance);
+      if (entry) markets.push(entry);
+    }
+
+    // ── ENRICH: apply resolved symbols + USD prices ─────────────────────
+
     for (const market of markets) {
       const symbolMap = market.network === 'devnet' ? devnetSymbols : mainnetSymbols;
       const resolved = symbolMap.get(market.collateralMint);
