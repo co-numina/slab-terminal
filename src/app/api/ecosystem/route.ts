@@ -9,6 +9,8 @@ import { NextResponse } from 'next/server';
 import { getCached, setCache } from '@/lib/connection';
 import { scanEcosystem } from '@/lib/radar';
 import { getSlabMarketData } from '@/lib/fetcher';
+import { resolveMintSymbolsBatch } from '@/lib/known-mints';
+import { getNetworkConnection } from '@/lib/connections';
 
 const CACHE_KEY = 'ecosystem_response';
 const CACHE_MS = 30_000;
@@ -58,9 +60,6 @@ export async function GET() {
     let parsedAccountCount = 0;
     let unparsedAccountCount = 0;
 
-    // Collect TVL by collateral token
-    const tvlByToken: Record<string, { amount: number; network: string }> = {};
-
     // Collect unique wallet owners
     const uniqueOwners = new Set<string>();
     const SYSTEM_PROGRAM = '11111111111111111111111111111111';
@@ -84,6 +83,9 @@ export async function GET() {
     }
 
     // Parse all slabs in parallel batches of 5 (with hints to skip resolution)
+    // Collect raw TVL entries for batch mint resolution after
+    const rawTvlEntries: { mint: string; network: string; amount: number }[] = [];
+
     for (let i = 0; i < slabJobs.length; i += 5) {
       const batch = slabJobs.slice(i, i + 5);
       const results = await Promise.allSettled(
@@ -108,18 +110,37 @@ export async function GET() {
           }
         }
 
-        const mintSymbol = detail.config.collateralMint.length > 20
-          ? (detail.config.collateralMint === 'So11111111111111111111111111111111111111112' ? 'SOL' :
-             detail.config.collateralMint.endsWith('perc') ? 'PERC' :
-             detail.config.collateralMint.slice(0, 6) + '...')
-          : detail.config.collateralMint;
-
-        const key = `${mintSymbol}_${detail.network}`;
-        if (!tvlByToken[key]) {
-          tvlByToken[key] = { amount: 0, network: detail.network };
-        }
-        tvlByToken[key].amount += detail.vaultBalanceSol;
+        rawTvlEntries.push({
+          mint: detail.config.collateralMint,
+          network: detail.network,
+          amount: detail.vaultBalanceSol,
+        });
       }
+    }
+
+    // Batch-resolve collateral mint symbols from Metaplex metadata
+    const devnetMints = [...new Set(rawTvlEntries.filter(e => e.network === 'devnet').map(e => e.mint))];
+    const mainnetMints = [...new Set(rawTvlEntries.filter(e => e.network === 'mainnet').map(e => e.mint))];
+
+    const [devnetSymbols, mainnetSymbols] = await Promise.all([
+      devnetMints.length > 0
+        ? resolveMintSymbolsBatch(devnetMints, getNetworkConnection('devnet'))
+        : Promise.resolve(new Map<string, string>()),
+      mainnetMints.length > 0
+        ? resolveMintSymbolsBatch(mainnetMints, getNetworkConnection('mainnet'))
+        : Promise.resolve(new Map<string, string>()),
+    ]);
+
+    // Build TVL by token using resolved symbols
+    const tvlByToken: Record<string, { amount: number; network: string }> = {};
+    for (const entry of rawTvlEntries) {
+      const symbolMap = entry.network === 'devnet' ? devnetSymbols : mainnetSymbols;
+      const mintSymbol = symbolMap.get(entry.mint) ?? entry.mint.slice(0, 6) + '...';
+      const key = `${mintSymbol}_${entry.network}`;
+      if (!tvlByToken[key]) {
+        tvlByToken[key] = { amount: 0, network: entry.network };
+      }
+      tvlByToken[key].amount += entry.amount;
     }
 
     const response = {

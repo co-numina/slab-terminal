@@ -11,7 +11,8 @@ import { NextResponse } from 'next/server';
 import { getCached, setCache } from '@/lib/connection';
 import { scanEcosystem } from '@/lib/radar';
 import { getSlabMarketData, type SlabDetail } from '@/lib/fetcher';
-import { resolveMintSymbol } from '@/lib/known-mints';
+import { resolveMintSymbol, resolveMintSymbolsBatch } from '@/lib/known-mints';
+import { getNetworkConnection } from '@/lib/connections';
 
 const CACHE_KEY = 'top_markets_response';
 const CACHE_MS = 60_000;
@@ -160,6 +161,27 @@ export async function GET(request: Request) {
           markets.push(result.value);
         }
       }
+    }
+
+    // Batch-resolve collateral mint symbols from Metaplex metadata
+    // Collect unique unknown mints and resolve per-network
+    const devnetMints = [...new Set(markets.filter(m => m.network === 'devnet').map(m => m.collateralMint))];
+    const mainnetMints = [...new Set(markets.filter(m => m.network === 'mainnet').map(m => m.collateralMint))];
+
+    const [devnetSymbols, mainnetSymbols] = await Promise.all([
+      devnetMints.length > 0
+        ? resolveMintSymbolsBatch(devnetMints, getNetworkConnection('devnet'))
+        : Promise.resolve(new Map<string, string>()),
+      mainnetMints.length > 0
+        ? resolveMintSymbolsBatch(mainnetMints, getNetworkConnection('mainnet'))
+        : Promise.resolve(new Map<string, string>()),
+    ]);
+
+    // Apply resolved symbols back to markets
+    for (const market of markets) {
+      const symbolMap = market.network === 'devnet' ? devnetSymbols : mainnetSymbols;
+      const resolved = symbolMap.get(market.collateralMint);
+      if (resolved) market.collateralSymbol = resolved;
     }
 
     // Default sort: by TVL desc
