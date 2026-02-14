@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { CACHE_DURATIONS } from '@/lib/constants';
 import { getCached, setCache } from '@/lib/connection';
-import { getMarketData } from '@/lib/fetcher';
+import { getAllMarketData } from '@/lib/fetcher';
 import { getEvents, recordSnapshot } from '@/lib/activity';
 import type { ActivityResponse } from '@/lib/types';
 
@@ -13,37 +13,30 @@ export async function GET() {
     const cached = getCached<ActivityResponse>(CACHE_KEY, CACHE_DURATIONS.ACTIVITY);
     if (cached) {
       return NextResponse.json(cached, {
-        headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=20' },
+        headers: { 'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10' },
       });
     }
 
-    const md = await getMarketData();
-    const { engine, allAccounts } = md;
+    const all = await getAllMarketData();
 
-    // Record current snapshot (diffs against previous, generates events)
-    recordSnapshot(engine, allAccounts);
-
-    let events = getEvents();
-
-    // If no events yet, add an info event
-    if (events.length === 0) {
-      events = [{
-        timestamp: new Date().toISOString(),
-        type: 'info',
-        details: `Market active: ${engine.numUsedAccounts} accounts, last crank slot ${engine.lastCrankSlot.toString()}`,
-        severity: 'normal',
-      }];
+    // Record snapshots for all slabs
+    for (const md of all.slabs) {
+      try {
+        recordSnapshot(md.slabLabel, md.engine, md.allAccounts);
+      } catch {
+        // Non-critical
+      }
     }
 
     const response: ActivityResponse = {
-      events,
+      events: getEvents(),
       timestamp: new Date().toISOString(),
     };
 
     setCache(CACHE_KEY, response);
 
     return NextResponse.json(response, {
-      headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=20' },
+      headers: { 'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10' },
     });
   } catch (error: unknown) {
     console.error('GET /api/activity error:', error);

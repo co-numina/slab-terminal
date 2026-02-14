@@ -140,6 +140,7 @@ export interface MarketResponse {
   tradingFeeBps: number;
   liquidationFeeBps: number;
   numAccounts: number;
+  numSlabs: number;
   lifetimeLiquidations: number;
   lifetimeForceCloses: number;
   lastEffectivePriceE6: string;
@@ -148,6 +149,8 @@ export interface MarketResponse {
 
 export interface PositionEntry {
   accountIndex: number;
+  slabPubkey: string;
+  slabLabel: string;
   accountId: string;
   owner: string;
   side: 'long' | 'short' | 'flat';
@@ -186,6 +189,8 @@ export interface LPEntry {
   index: number;
   type: 'passive' | 'vamm';
   label: string;
+  slabPubkey: string;
+  slabLabel: string;
   collateral: number;
   pnl: number;
   effectiveCapital: number;

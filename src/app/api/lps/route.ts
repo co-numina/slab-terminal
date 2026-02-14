@@ -1,28 +1,12 @@
 import { NextResponse } from 'next/server';
-import { CONFIG, CACHE_DURATIONS } from '@/lib/constants';
+import { CACHE_DURATIONS } from '@/lib/constants';
 import { getConnection, getCached, setCache } from '@/lib/connection';
-import { getMarketData } from '@/lib/fetcher';
+import { getAllMarketData } from '@/lib/fetcher';
 import { parseMatcherContext } from '@/lib/matcher';
 import { AccountKind } from '@/lib/types';
 import type { LPsResponse, LPEntry } from '@/lib/types';
 
 const CACHE_KEY = 'lps_response';
-
-// LP definitions with their known matcher contexts
-const LP_CONFIGS = [
-  {
-    index: 0,
-    label: 'LP 0 — PASSIVE',
-    ctxPubkey: CONFIG.LP0_MATCHER_CTX,
-    pdaPubkey: CONFIG.LP0_PDA,
-  },
-  {
-    index: 4,
-    label: 'LP 4 — vAMM',
-    ctxPubkey: CONFIG.LP4_MATCHER_CTX,
-    pdaPubkey: CONFIG.LP4_PDA,
-  },
-];
 
 export async function GET() {
   try {
@@ -35,90 +19,103 @@ export async function GET() {
     }
 
     const connection = getConnection();
-    const md = await getMarketData();
-    const { allAccounts, solUsdPrice } = md;
+    const all = await getAllMarketData();
+    const lps: LPEntry[] = [];
 
-    // Fetch matcher contexts in parallel
-    const [ctx0, ctx4] = await Promise.all([
-      parseMatcherContext(connection, CONFIG.LP0_MATCHER_CTX).catch(() => null),
-      parseMatcherContext(connection, CONFIG.LP4_MATCHER_CTX).catch(() => null),
-    ]);
+    // Discover LPs dynamically across all slabs
+    for (const md of all.slabs) {
+      const { allAccounts, solUsdPrice, slabPubkey, slabLabel } = md;
 
-    // Find LP accounts in slab
-    const lpAccounts = allAccounts.filter(a => a.account.kind === AccountKind.LP);
-    const matcherContexts = [ctx0, ctx4];
+      // Find LP accounts in this slab
+      const lpAccounts = allAccounts.filter(a => a.account.kind === AccountKind.LP);
 
-    const lps: LPEntry[] = LP_CONFIGS.map((lpConfig, i) => {
-      const ctx = matcherContexts[i];
-
-      // Find the LP account in the slab
-      const lpAccount = lpAccounts.find(
-        a => a.account.owner.toBase58() === lpConfig.pdaPubkey.toBase58()
-          || a.account.matcherContext.toBase58() === lpConfig.ctxPubkey.toBase58()
+      // Fetch matcher contexts for all LPs in this slab in parallel
+      const ctxResults = await Promise.all(
+        lpAccounts.map(async (lp) => {
+          const ctxPubkey = lp.account.matcherContext;
+          // Skip if matcher context is all zeros (no matcher)
+          const ctxStr = ctxPubkey.toBase58();
+          if (ctxStr === '11111111111111111111111111111111') return null;
+          try {
+            const ctx = await parseMatcherContext(connection, ctxPubkey);
+            return { lp, ctx };
+          } catch {
+            return { lp, ctx: null };
+          }
+        })
       );
 
-      const collateral = lpAccount ? Number(lpAccount.account.capital) / 1e9 : 0;
-      const pnl = lpAccount ? Number(lpAccount.account.pnl) / 1e9 : 0;
-      const effectiveCapital = lpAccount
-        ? Number(lpAccount.account.capital + lpAccount.account.pnl) / 1e9
-        : 0;
-      const positionSize = lpAccount ? lpAccount.account.positionSize.toString() : '0';
-      const positionNotional = lpAccount
-        ? Number(
-            (lpAccount.account.positionSize < 0n ? -lpAccount.account.positionSize : lpAccount.account.positionSize)
-          ) / 1e9 * solUsdPrice
-        : 0;
+      for (const result of ctxResults) {
+        if (!result) continue;
+        const { lp, ctx } = result;
+        const { idx, account } = lp;
 
-      if (!ctx) {
-        return {
-          index: lpConfig.index,
-          type: lpConfig.index === 0 ? 'passive' : 'vamm' as 'passive' | 'vamm',
-          label: lpConfig.label,
+        const collateral = Number(account.capital) / 1e9;
+        const pnl = Number(account.pnl) / 1e9;
+        const effectiveCapital = Number(account.capital + account.pnl) / 1e9;
+        const positionSize = account.positionSize.toString();
+        const positionNotional = Number(
+          (account.positionSize < 0n ? -account.positionSize : account.positionSize)
+        ) / 1e9 * solUsdPrice;
+
+        if (!ctx) {
+          lps.push({
+            index: idx,
+            type: 'passive',
+            label: `LP ${idx} (${slabLabel})`,
+            slabPubkey: slabPubkey.toBase58(),
+            slabLabel,
+            collateral,
+            pnl,
+            effectiveCapital,
+            positionSize,
+            positionNotional,
+            spreadBps: 0,
+            tradingFeeBps: 0,
+            impactKBps: null,
+            maxTotalBps: 0,
+            inventory: 0,
+            maxInventory: 0,
+            utilization: 0,
+            lastExecPrice: 0,
+            lastOraclePrice: 0,
+            liquidityNotional: 0,
+          });
+          continue;
+        }
+
+        const inventory = ctx.inventoryBase;
+        const maxInventory = ctx.maxInventoryAbs;
+        const utilization = maxInventory > 0
+          ? (Math.abs(inventory) / maxInventory) * 100
+          : 0;
+
+        const typeLabel = ctx.kind === 'passive' ? 'PASSIVE' : 'vAMM';
+
+        lps.push({
+          index: idx,
+          type: ctx.kind,
+          label: `LP ${idx} — ${typeLabel} (${slabLabel})`,
+          slabPubkey: slabPubkey.toBase58(),
+          slabLabel,
           collateral,
           pnl,
           effectiveCapital,
           positionSize,
           positionNotional,
-          spreadBps: 0,
-          tradingFeeBps: 0,
-          impactKBps: null,
-          maxTotalBps: 0,
-          inventory: 0,
-          maxInventory: 0,
-          utilization: 0,
-          lastExecPrice: 0,
-          lastOraclePrice: 0,
-          liquidityNotional: 0,
-        };
+          spreadBps: ctx.baseSpreadBps,
+          tradingFeeBps: ctx.tradingFeeBps,
+          impactKBps: ctx.kind === 'vamm' ? ctx.impactKBps : null,
+          maxTotalBps: ctx.maxTotalBps,
+          inventory,
+          maxInventory,
+          utilization,
+          lastExecPrice: ctx.lastExecPrice,
+          lastOraclePrice: ctx.lastOraclePrice,
+          liquidityNotional: ctx.liquidityNotionalE6 / 1e6,
+        });
       }
-
-      const inventory = ctx.inventoryBase;
-      const maxInventory = ctx.maxInventoryAbs;
-      const utilization = maxInventory > 0
-        ? (Math.abs(inventory) / maxInventory) * 100
-        : 0;
-
-      return {
-        index: lpConfig.index,
-        type: ctx.kind,
-        label: lpConfig.label,
-        collateral,
-        pnl,
-        effectiveCapital,
-        positionSize,
-        positionNotional,
-        spreadBps: ctx.baseSpreadBps,
-        tradingFeeBps: ctx.tradingFeeBps,
-        impactKBps: ctx.kind === 'vamm' ? ctx.impactKBps : null,
-        maxTotalBps: ctx.maxTotalBps,
-        inventory,
-        maxInventory,
-        utilization,
-        lastExecPrice: ctx.lastExecPrice,    // Already SOL/USD after inversion in matcher.ts
-        lastOraclePrice: ctx.lastOraclePrice, // Already SOL/USD after inversion in matcher.ts
-        liquidityNotional: ctx.liquidityNotionalE6 / 1e6,
-      };
-    });
+    }
 
     const response: LPsResponse = {
       lps,
