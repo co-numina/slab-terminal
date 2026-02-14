@@ -2,6 +2,7 @@
 
 import { useMarketData } from "@/hooks/use-market-data"
 import { ExplorerLink, truncateAddress } from "./explorer-link"
+import { useNavigation, type ViewId } from "@/hooks/use-navigation"
 
 const ASCII_LOGO = `███████╗██╗     ███████╗ ██████╗
 ██╔════╝██║    ██╔══██╗██╔══██╗
@@ -26,8 +27,14 @@ function crankColor(slotDiff: number): string {
   return "var(--terminal-red)"
 }
 
+const TABS: { id: ViewId; label: string }[] = [
+  { id: "dashboard", label: "DASHBOARD" },
+  { id: "radar", label: "RADAR" },
+]
+
 export function Header() {
   const { data } = useMarketData()
+  const { activeView, setActiveView } = useNavigation()
 
   const price = data?.oraclePrice ?? 0
   const change = data?.priceChange24h ?? 0
@@ -51,7 +58,7 @@ export function Header() {
           </span>
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] uppercase tracking-[0.25em] text-[var(--terminal-dim)]">
-              PERCOLATOR TERMINAL
+              PERCOLATOR ECOSYSTEM INTELLIGENCE
             </span>
             <div className="flex items-center gap-2">
               <span className="border border-[var(--terminal-amber)] px-1 py-px text-[9px] text-[var(--terminal-amber)]">
@@ -127,6 +134,30 @@ export function Header() {
           )}
         </div>
       </div>
+
+      {/* Tab navigation */}
+      <nav className="flex items-center gap-0 border-t border-[var(--terminal-border)] px-3">
+        {TABS.map((tab) => {
+          const isActive = activeView === tab.id
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveView(tab.id)}
+              className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all select-none ${
+                isActive
+                  ? "text-[var(--terminal-green)] border-b-2 border-[var(--terminal-green)]"
+                  : "text-[var(--terminal-dim)] hover:text-[var(--terminal-green)] border-b-2 border-transparent"
+              }`}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
+        <span className="flex-1" />
+        <span className="text-[9px] text-[var(--terminal-dim)] py-1.5">
+          SLAB SCOPE
+        </span>
+      </nav>
     </header>
   )
 }

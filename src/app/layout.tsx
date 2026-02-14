@@ -9,9 +9,9 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "SLAB \u2014 Percolator Terminal",
+  title: "SLAB SCOPE \u2014 Percolator Ecosystem Intelligence",
   description:
-    "Live terminal dashboard for Percolator perpetual futures on Solana Devnet",
+    "The only eyes on every Percolator deployment \u2014 ecosystem intelligence across devnet and mainnet",
 }
 
 export const viewport: Viewport = {

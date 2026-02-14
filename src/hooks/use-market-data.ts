@@ -96,3 +96,25 @@ export function useActivity() {
     refreshInterval: 5000,
   })
 }
+
+// ── Crank bot status ────────────────────────────────────────────────────
+
+export interface CrankStatus {
+  running: boolean
+  walletPubkey: string
+  walletBalance: number
+  lastCrankSignature: string | null
+  lastCrankSlot: number
+  lastCrankTimestamp: number
+  crankCount: number
+  errorCount: number
+  lastError: string | null
+  intervalMs: number
+  slabPubkey: string
+}
+
+export function useCrankStatus() {
+  return useSWR<CrankStatus>("/api/crank/status", fetcher, {
+    refreshInterval: 3000,
+  })
+}

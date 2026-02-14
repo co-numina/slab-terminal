@@ -5,18 +5,21 @@ export function ExplorerLink({
   address,
   label,
   className = "",
+  network = "devnet",
 }: {
   type: "address" | "tx"
   address: string
   label?: string
   className?: string
+  network?: "devnet" | "mainnet"
 }) {
   if (!address) return null
 
+  const clusterParam = network === "mainnet" ? "" : "?cluster=devnet"
   const url =
     type === "tx"
-      ? `https://explorer.solana.com/tx/${address}?cluster=devnet`
-      : `https://explorer.solana.com/address/${address}?cluster=devnet`
+      ? `https://explorer.solana.com/tx/${address}${clusterParam}`
+      : `https://explorer.solana.com/address/${address}${clusterParam}`
 
   return (
     <a

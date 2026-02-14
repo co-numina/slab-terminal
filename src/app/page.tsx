@@ -1,36 +1,34 @@
 "use client"
 
+import { NavigationProvider, useNavigation } from "@/hooks/use-navigation"
 import { Header } from "@/components/terminal/header"
-import { MarketOverview } from "@/components/terminal/market-overview"
-import { LPPerformance } from "@/components/terminal/lp-performance"
-import { PositionsTable } from "@/components/terminal/positions-table"
-import { LiquidationRisk } from "@/components/terminal/liquidation-risk"
-import { ActivityFeed } from "@/components/terminal/activity-feed"
 import { Footer } from "@/components/terminal/footer"
+import { DashboardView } from "@/components/terminal/views/dashboard-view"
+import { RadarView } from "@/components/terminal/views/radar-view"
+
+function ViewRouter() {
+  const { activeView } = useNavigation()
+  switch (activeView) {
+    case "radar":
+      return <RadarView />
+    case "dashboard":
+    default:
+      return <DashboardView />
+  }
+}
 
 export default function Dashboard() {
   return (
-    <div className="scanlines flex min-h-screen flex-col bg-[var(--terminal-bg)]">
-      <Header />
+    <NavigationProvider>
+      <div className="scanlines flex min-h-screen flex-col bg-[var(--terminal-bg)]">
+        <Header />
 
-      <main className="flex flex-1 flex-col gap-px p-1 lg:p-1.5">
-        {/* Row 1: Market Overview + LP Performance */}
-        <div className="grid grid-cols-1 gap-px lg:grid-cols-2">
-          <MarketOverview />
-          <LPPerformance />
-        </div>
+        <main className="flex flex-1 flex-col gap-px p-1 lg:p-1.5">
+          <ViewRouter />
+        </main>
 
-        {/* Row 2: Positions Table */}
-        <PositionsTable />
-
-        {/* Row 3: Liquidation Risk + Activity Feed */}
-        <div className="grid grid-cols-1 gap-px lg:grid-cols-2">
-          <LiquidationRisk />
-          <ActivityFeed />
-        </div>
-      </main>
-
-      <Footer />
-    </div>
+        <Footer />
+      </div>
+    </NavigationProvider>
   )
 }
