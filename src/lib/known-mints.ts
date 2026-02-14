@@ -1,8 +1,13 @@
 /**
  * Token mint address → symbol resolution.
  *
- * Hardcoded map for well-known mints, plus async resolver that fetches
- * Metaplex token metadata on-chain for unknown mints and caches forever.
+ * Resolution order:
+ *   1. Hardcoded map (SOL, PERC, USDC, USDT)
+ *   2. In-memory cache (survives across requests in same process)
+ *   3. Jupiter Token API — https://tokens.jup.ag/token/<MINT>
+ *      (same approach used by percolator-sov frontend)
+ *   4. Metaplex Token Metadata PDA on-chain
+ *   5. Truncated address fallback
  */
 import { PublicKey, type Connection } from '@solana/web3.js';
 
@@ -15,7 +20,7 @@ export const KNOWN_MINTS: Record<string, string> = {
   'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
 };
 
-// ── In-memory cache for resolved mints ──────────────────────────────
+// ── In-memory cache for resolved mints (survives across requests) ───
 
 const resolvedCache = new Map<string, string>();
 
@@ -23,8 +28,7 @@ const resolvedCache = new Map<string, string>();
 const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 /**
- * Synchronous fallback — uses hardcoded map only.
- * Returns human-readable symbol or truncated address.
+ * Synchronous — uses hardcoded map + runtime cache only.
  */
 export function resolveMintSymbol(mintAddress: string): string {
   if (KNOWN_MINTS[mintAddress]) return KNOWN_MINTS[mintAddress];
@@ -32,54 +36,113 @@ export function resolveMintSymbol(mintAddress: string): string {
   return `${mintAddress.slice(0, 4)}...${mintAddress.slice(-4)}`;
 }
 
-/**
- * Async resolver — fetches Metaplex metadata on-chain for unknown mints.
- * Caches results in memory so each mint is only fetched once per process.
- *
- * Returns the resolved symbol (or a truncated address if metadata unavailable).
- */
-export async function resolveMintSymbolAsync(
-  mintAddress: string,
-  connection: Connection,
-): Promise<string> {
-  // Check hardcoded first
-  if (KNOWN_MINTS[mintAddress]) return KNOWN_MINTS[mintAddress];
+// ── Jupiter Token API ───────────────────────────────────────────────
 
-  // Check runtime cache
-  if (resolvedCache.has(mintAddress)) return resolvedCache.get(mintAddress)!;
-
-  // Try to fetch Metaplex metadata PDA
-  try {
-    const mintPubkey = new PublicKey(mintAddress);
-    const [metadataPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('metadata'),
-        TOKEN_METADATA_PROGRAM.toBuffer(),
-        mintPubkey.toBuffer(),
-      ],
-      TOKEN_METADATA_PROGRAM,
-    );
-
-    const info = await connection.getAccountInfo(metadataPda);
-    if (info && info.data.length > 0) {
-      const symbol = parseMetaplexSymbol(info.data);
-      if (symbol) {
-        resolvedCache.set(mintAddress, symbol);
-        return symbol;
-      }
-    }
-  } catch {
-    // RPC error — fall through to truncated address
-  }
-
-  // Fallback: cache the truncated form so we don't retry
-  const truncated = `${mintAddress.slice(0, 4)}...${mintAddress.slice(-4)}`;
-  resolvedCache.set(mintAddress, truncated);
-  return truncated;
+interface JupiterTokenResponse {
+  symbol?: string;
+  name?: string;
+  decimals?: number;
 }
 
 /**
- * Batch-resolve multiple mints in one shot. Dedupes and runs in parallel.
+ * Fetch token symbol from Jupiter Token API.
+ * Returns null if the token isn't indexed or the request fails.
+ */
+async function fetchJupiterSymbol(mintAddress: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://tokens.jup.ag/token/${mintAddress}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as JupiterTokenResponse;
+    const symbol = data.symbol?.trim();
+    return symbol && symbol.length > 0 ? symbol : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Batch-fetch symbols from Jupiter for multiple mints.
+ * Jupiter doesn't have a batch endpoint, so we fire parallel requests
+ * but cap concurrency to avoid hammering them.
+ */
+async function fetchJupiterSymbolsBatch(
+  mints: string[],
+): Promise<Map<string, string>> {
+  const results = new Map<string, string>();
+  // Cap at 10 concurrent requests
+  for (let i = 0; i < mints.length; i += 10) {
+    const batch = mints.slice(i, i + 10);
+    const settled = await Promise.allSettled(
+      batch.map(async (mint) => {
+        const symbol = await fetchJupiterSymbol(mint);
+        return { mint, symbol };
+      }),
+    );
+    for (const result of settled) {
+      if (result.status === 'fulfilled' && result.value.symbol) {
+        results.set(result.value.mint, result.value.symbol);
+      }
+    }
+  }
+  return results;
+}
+
+// ── Metaplex metadata parser ────────────────────────────────────────
+
+/**
+ * Parse the symbol field from raw Metaplex Token Metadata account data.
+ *
+ * Borsh layout:
+ *   offset 0:  key (1 byte)
+ *   offset 1:  update_authority (32 bytes)
+ *   offset 33: mint (32 bytes)
+ *   offset 65: name (borsh string: 4-byte LE length + UTF-8 data)
+ *   after name: symbol (borsh string: 4-byte LE length + UTF-8 data)
+ */
+function parseMetaplexSymbol(data: Buffer | Uint8Array): string | null {
+  try {
+    const buf = Buffer.from(data);
+    if (buf.length < 70) return null;
+
+    let offset = 65; // skip key + update_authority + mint
+
+    // Read name (borsh string)
+    if (offset + 4 > buf.length) return null;
+    const nameLen = buf.readUInt32LE(offset);
+    offset += 4;
+    if (nameLen > 200 || offset + nameLen > buf.length) return null;
+    offset += nameLen;
+
+    // Read symbol (borsh string)
+    if (offset + 4 > buf.length) return null;
+    const symbolLen = buf.readUInt32LE(offset);
+    offset += 4;
+    if (symbolLen > 50 || offset + symbolLen > buf.length) return null;
+
+    const raw = buf.slice(offset, offset + symbolLen).toString('utf-8');
+    // Metaplex pads with null bytes — strip them
+    const symbol = raw.replace(/\0/g, '').trim();
+    return symbol.length > 0 ? symbol : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Batch resolver (main entry point) ───────────────────────────────
+
+/**
+ * Batch-resolve multiple mint addresses to symbols.
+ *
+ * Resolution chain per mint:
+ *   1. Hardcoded KNOWN_MINTS
+ *   2. In-memory resolvedCache
+ *   3. Jupiter Token API (parallel, capped at 10 concurrent)
+ *   4. Metaplex Token Metadata PDA (single getMultipleAccountsInfo)
+ *   5. Truncated address fallback
+ *
+ * All resolved symbols are cached in memory for the process lifetime.
  */
 export async function resolveMintSymbolsBatch(
   mintAddresses: string[],
@@ -88,6 +151,7 @@ export async function resolveMintSymbolsBatch(
   const results = new Map<string, string>();
   const toFetch: string[] = [];
 
+  // Phase 1: check hardcoded + cache
   for (const addr of mintAddresses) {
     if (KNOWN_MINTS[addr]) {
       results.set(addr, KNOWN_MINTS[addr]);
@@ -100,27 +164,41 @@ export async function resolveMintSymbolsBatch(
 
   if (toFetch.length === 0) return results;
 
-  // Derive all PDAs
-  const pdaEntries = toFetch.map(addr => {
-    const mintPubkey = new PublicKey(addr);
-    const [pda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('metadata'),
-        TOKEN_METADATA_PROGRAM.toBuffer(),
-        mintPubkey.toBuffer(),
-      ],
-      TOKEN_METADATA_PROGRAM,
-    );
-    return { mint: addr, pda };
-  });
+  // Phase 2: try Jupiter Token API first (fast, covers most tokens)
+  const jupiterResults = await fetchJupiterSymbolsBatch(toFetch);
+  const stillUnresolved: string[] = [];
 
-  // Fetch all metadata accounts in one getMultipleAccountsInfo call
+  for (const addr of toFetch) {
+    const jupSymbol = jupiterResults.get(addr);
+    if (jupSymbol) {
+      resolvedCache.set(addr, jupSymbol);
+      results.set(addr, jupSymbol);
+    } else {
+      stillUnresolved.push(addr);
+    }
+  }
+
+  if (stillUnresolved.length === 0) return results;
+
+  // Phase 3: try Metaplex metadata on-chain for remaining
   try {
-    const pdaKeys = pdaEntries.map(e => e.pda);
+    const pdaEntries = stillUnresolved.map(addr => {
+      const mintPubkey = new PublicKey(addr);
+      const [pda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('metadata'),
+          TOKEN_METADATA_PROGRAM.toBuffer(),
+          mintPubkey.toBuffer(),
+        ],
+        TOKEN_METADATA_PROGRAM,
+      );
+      return { mint: addr, pda };
+    });
+
     // Batch in groups of 100 (RPC limit)
-    for (let i = 0; i < pdaKeys.length; i += 100) {
-      const batchKeys = pdaKeys.slice(i, i + 100);
+    for (let i = 0; i < pdaEntries.length; i += 100) {
       const batchEntries = pdaEntries.slice(i, i + 100);
+      const batchKeys = batchEntries.map(e => e.pda);
       const infos = await connection.getMultipleAccountsInfo(batchKeys);
 
       for (let j = 0; j < infos.length; j++) {
@@ -135,15 +213,15 @@ export async function resolveMintSymbolsBatch(
             continue;
           }
         }
-        // No metadata — cache truncated
+        // Phase 4: fallback — truncated address
         const truncated = `${mint.slice(0, 4)}...${mint.slice(-4)}`;
         resolvedCache.set(mint, truncated);
         results.set(mint, truncated);
       }
     }
   } catch {
-    // Batch failed — fall back to truncated for all
-    for (const addr of toFetch) {
+    // Metaplex batch failed — fall back to truncated for all
+    for (const addr of stillUnresolved) {
       if (!results.has(addr)) {
         const truncated = `${addr.slice(0, 4)}...${addr.slice(-4)}`;
         resolvedCache.set(addr, truncated);
@@ -153,55 +231,4 @@ export async function resolveMintSymbolsBatch(
   }
 
   return results;
-}
-
-// ── Metaplex metadata parser ────────────────────────────────────────
-
-/**
- * Parse the symbol field from raw Metaplex Token Metadata account data.
- *
- * Metaplex metadata v1 layout (simplified):
- *   [0]       key (1 byte)
- *   [1..33]   update authority (32 bytes)
- *   [33..65]  mint (32 bytes)
- *   [65..69]  name length (4 bytes LE u32)
- *   [69..69+nameLen] name (variable, padded to 32 bytes... actually uses Borsh string)
- *
- * Borsh string: 4-byte LE length prefix, then UTF-8 bytes.
- * Layout:
- *   offset 1: key
- *   offset 1+32: update_authority
- *   offset 1+32+32: mint
- *   offset 65: name (borsh string: 4-byte len + data)
- *   after name: symbol (borsh string: 4-byte len + data)
- */
-function parseMetaplexSymbol(data: Buffer | Uint8Array): string | null {
-  try {
-    const buf = Buffer.from(data);
-    if (buf.length < 70) return null;
-
-    // Skip key (1) + update_authority (32) + mint (32) = 65
-    let offset = 65;
-
-    // Read name (borsh string: 4 byte LE length + data)
-    if (offset + 4 > buf.length) return null;
-    const nameLen = buf.readUInt32LE(offset);
-    offset += 4;
-    if (nameLen > 200 || offset + nameLen > buf.length) return null;
-    offset += nameLen;
-
-    // Read symbol (borsh string: 4 byte LE length + data)
-    if (offset + 4 > buf.length) return null;
-    const symbolLen = buf.readUInt32LE(offset);
-    offset += 4;
-    if (symbolLen > 50 || offset + symbolLen > buf.length) return null;
-
-    const raw = buf.slice(offset, offset + symbolLen).toString('utf-8');
-    // Metaplex pads with null bytes — strip them
-    const symbol = raw.replace(/\0/g, '').trim();
-
-    return symbol.length > 0 ? symbol : null;
-  } catch {
-    return null;
-  }
 }
