@@ -88,27 +88,24 @@ export async function GET() {
 
     const radar = await scanEcosystem();
 
-    // Determine which slabs to parse
-    const slabsToParse: { pubkey: string; programId: string }[] = [];
+    // Determine which slabs to parse (with program hints)
+    const slabsToParse: { pubkey: string; programId: string; network: 'devnet' | 'mainnet' }[] = [];
 
     for (const program of radar.programs) {
       if (ALWAYS_PARSE.has(program.id)) {
-        // Parse all active slabs from small programs
         for (const slab of program.slabs) {
           if (slab.numUsedAccounts > 0) {
-            slabsToParse.push({ pubkey: slab.pubkey, programId: program.id });
+            slabsToParse.push({ pubkey: slab.pubkey, programId: program.programId, network: program.network });
           }
         }
       } else {
-        // For large programs (Launch), only parse slabs showing activity
-        // Use top 3 slabs by account count as a heuristic
         const activeSlabs = program.slabs
           .filter(s => s.numUsedAccounts > 0 && s.health !== 'dead')
           .sort((a, b) => b.numUsedAccounts - a.numUsedAccounts)
           .slice(0, 3);
 
         for (const slab of activeSlabs) {
-          slabsToParse.push({ pubkey: slab.pubkey, programId: program.id });
+          slabsToParse.push({ pubkey: slab.pubkey, programId: program.programId, network: program.network });
         }
       }
     }
@@ -118,11 +115,14 @@ export async function GET() {
     let totalScanned = 0;
     let slabsParsed = 0;
 
-    // Parse in batches of 3
-    for (let i = 0; i < slabsToParse.length; i += 3) {
-      const batch = slabsToParse.slice(i, i + 3);
+    // Parse in parallel batches of 5 (with hints to skip resolution)
+    for (let i = 0; i < slabsToParse.length; i += 5) {
+      const batch = slabsToParse.slice(i, i + 5);
       const results = await Promise.allSettled(
-        batch.map(s => getSlabMarketData(s.pubkey)),
+        batch.map(s => getSlabMarketData(s.pubkey, {
+          programId: s.programId,
+          network: s.network,
+        })),
       );
 
       for (const result of results) {

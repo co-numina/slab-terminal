@@ -61,44 +61,54 @@ export async function GET() {
     // Collect TVL by collateral token
     const tvlByToken: Record<string, { amount: number; network: string }> = {};
 
-    // Parse slabs from small programs
+    // Collect all slab parse jobs with hints (skip expensive resolveSlabProgram)
+    const slabJobs: { pubkey: string; programId: string; network: 'devnet' | 'mainnet' }[] = [];
+
     for (const program of radar.programs) {
       if (PARSE_PROGRAMS.has(program.id) && program.slabs.length > 0) {
-        // Parse top 5 slabs per program (most active)
         const slabsToParse = program.slabs
           .filter(s => s.numUsedAccounts > 0)
           .slice(0, 5);
 
         for (const slab of slabsToParse) {
-          try {
-            const detail = await getSlabMarketData(slab.pubkey);
-            parsedAccountCount += detail.positions.length;
-
-            for (const pos of detail.positions) {
-              if (pos.side === 'long') activeLongs++;
-              else if (pos.side === 'short') activeShorts++;
-              else flatAccounts++;
-            }
-
-            // TVL aggregation
-            const mintSymbol = detail.config.collateralMint.length > 20
-              ? (detail.config.collateralMint === 'So11111111111111111111111111111111111111112' ? 'SOL' :
-                 detail.config.collateralMint.endsWith('perc') ? 'PERC' :
-                 detail.config.collateralMint.slice(0, 6) + '...')
-              : detail.config.collateralMint;
-
-            const key = `${mintSymbol}_${detail.network}`;
-            if (!tvlByToken[key]) {
-              tvlByToken[key] = { amount: 0, network: detail.network };
-            }
-            tvlByToken[key].amount += detail.vaultBalanceSol;
-          } catch (err) {
-            console.warn(`[ecosystem] Failed to parse ${slab.pubkey.slice(0, 8)}: ${err}`);
-          }
+          slabJobs.push({ pubkey: slab.pubkey, programId: program.programId, network: program.network });
         }
       } else {
-        // Count as unparsed
         unparsedAccountCount += program.accountCount;
+      }
+    }
+
+    // Parse all slabs in parallel batches of 5 (with hints to skip resolution)
+    for (let i = 0; i < slabJobs.length; i += 5) {
+      const batch = slabJobs.slice(i, i + 5);
+      const results = await Promise.allSettled(
+        batch.map(job =>
+          getSlabMarketData(job.pubkey, { programId: job.programId, network: job.network })
+        ),
+      );
+
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const detail = result.value;
+        parsedAccountCount += detail.positions.length;
+
+        for (const pos of detail.positions) {
+          if (pos.side === 'long') activeLongs++;
+          else if (pos.side === 'short') activeShorts++;
+          else flatAccounts++;
+        }
+
+        const mintSymbol = detail.config.collateralMint.length > 20
+          ? (detail.config.collateralMint === 'So11111111111111111111111111111111111111112' ? 'SOL' :
+             detail.config.collateralMint.endsWith('perc') ? 'PERC' :
+             detail.config.collateralMint.slice(0, 6) + '...')
+          : detail.config.collateralMint;
+
+        const key = `${mintSymbol}_${detail.network}`;
+        if (!tvlByToken[key]) {
+          tvlByToken[key] = { amount: 0, network: detail.network };
+        }
+        tvlByToken[key].amount += detail.vaultBalanceSol;
       }
     }
 

@@ -399,23 +399,57 @@ async function resolveSlabProgram(slabAddress: string): Promise<{
 }
 
 /**
+ * Optional hints to skip expensive resolveSlabProgram() when the caller
+ * already knows which program/network owns the slab (e.g. from radar data).
+ */
+export interface SlabHints {
+  programId?: string;
+  network?: NetworkId;
+}
+
+/**
  * Fetch full market data for a SINGLE slab from any program/network.
  * This is the core of the drill-down view.
  * Caches for 5s per slab address.
+ *
+ * Pass `hints` when you already know the program/network (e.g. from radar)
+ * to skip the expensive resolveSlabProgram() resolution step.
  */
-export async function getSlabMarketData(slabAddress: string): Promise<SlabDetail> {
+export async function getSlabMarketData(slabAddress: string, hints?: SlabHints): Promise<SlabDetail> {
   const cacheKey = `slab_detail_${slabAddress}`;
   const cached = getCached<SlabDetail>(cacheKey, CACHE_DURATIONS.SLAB);
   if (cached) return cached;
 
-  // Resolve which program/network owns this slab
-  const resolved = await resolveSlabProgram(slabAddress);
-  if (!resolved) {
-    throw new Error(`Slab not found on any known program: ${slabAddress}`);
-  }
+  let entry: (typeof PROGRAM_REGISTRY)[number];
+  let connection: Connection;
+  let slabData: Buffer;
 
-  const { entry, connection, accountData } = resolved;
-  const slabData = accountData;
+  // Fast path: if hints provided, skip resolution — just fetch the account directly
+  if (hints?.programId && hints?.network) {
+    const matched = PROGRAM_REGISTRY.find(e => e.programId === hints.programId && e.network === hints.network);
+    if (matched) {
+      connection = getNetworkConnection(hints.network);
+      const pubkey = new PublicKey(slabAddress);
+      const info = await connection.getAccountInfo(pubkey);
+      if (!info) throw new Error(`Slab account not found: ${slabAddress}`);
+      entry = matched;
+      slabData = Buffer.from(info.data);
+    } else {
+      // Hints didn't match registry, fall back to resolution
+      const resolved = await resolveSlabProgram(slabAddress);
+      if (!resolved) throw new Error(`Slab not found on any known program: ${slabAddress}`);
+      entry = resolved.entry;
+      connection = resolved.connection;
+      slabData = resolved.accountData;
+    }
+  } else {
+    // No hints — resolve which program/network owns this slab
+    const resolved = await resolveSlabProgram(slabAddress);
+    if (!resolved) throw new Error(`Slab not found on any known program: ${slabAddress}`);
+    entry = resolved.entry;
+    connection = resolved.connection;
+    slabData = resolved.accountData;
+  }
 
   // Parse the full slab
   const header = parseHeader(slabData);
@@ -424,8 +458,9 @@ export async function getSlabMarketData(slabAddress: string): Promise<SlabDetail
   const engine = parseEngine(slabData);
   const allAccounts = parseAllAccounts(slabData);
 
-  // Get slot
-  const slot = await connection.getSlot('confirmed').catch(() => 0);
+  // Get slot + vault balance in parallel
+  let slot = 0;
+  let vaultBalanceSol = 0;
 
   // Oracle price: try the slab's effective price first
   let oraclePriceE6: bigint;
@@ -439,25 +474,25 @@ export async function getSlabMarketData(slabAddress: string): Promise<SlabDetail
     solUsdPrice = 0;
   }
 
+  // Fetch slot, vault balance, and oracle in parallel
+  const fetchPromises: Promise<void>[] = [
+    connection.getSlot('confirmed').then(s => { slot = s; }).catch(() => {}),
+    connection.getTokenAccountBalance(config.vaultPubkey)
+      .then(bal => { vaultBalanceSol = Number(bal.value.amount) / 1e9; })
+      .catch(() => {}),
+  ];
+
   // For devnet Toly, try the real oracle too
   if (entry.network === 'devnet' && entry.oracleAddress) {
-    try {
-      const oracleData = await getOraclePrice(connection);
-      oraclePriceE6 = oracleData.invertedPriceE6;
-      solUsdPrice = oracleData.solUsdPrice;
-    } catch {
-      // Keep effective price
-    }
+    fetchPromises.push(
+      getOraclePrice(connection).then(oracleData => {
+        oraclePriceE6 = oracleData.invertedPriceE6;
+        solUsdPrice = oracleData.solUsdPrice;
+      }).catch(() => {})
+    );
   }
 
-  // Vault balance
-  let vaultBalanceSol = 0;
-  try {
-    const vaultBal = await connection.getTokenAccountBalance(config.vaultPubkey);
-    vaultBalanceSol = Number(vaultBal.value.amount) / 1e9;
-  } catch {
-    // Vault may not exist or be a different token
-  }
+  await Promise.all(fetchPromises);
 
   // Funding rate
   const fundingRate = calculateFundingRate(engine, config, oraclePriceE6);

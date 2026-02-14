@@ -119,14 +119,14 @@ export async function GET(request: Request) {
     const radar = await scanEcosystem();
 
     // Flatten all slabs with their program context, sort by accounts desc
-    const allSlabs: { pubkey: string; program: string; network: string; accounts: number; crankAge: number }[] = [];
+    const allSlabs: { pubkey: string; programId: string; network: 'devnet' | 'mainnet'; accounts: number; crankAge: number }[] = [];
 
     for (const program of radar.programs) {
       for (const slab of program.slabs) {
         if (slab.numUsedAccounts > 0) {
           allSlabs.push({
             pubkey: slab.pubkey,
-            program: program.id,
+            programId: program.programId,
             network: program.network,
             accounts: slab.numUsedAccounts,
             crankAge: slab.lastCrankAge,
@@ -142,12 +142,15 @@ export async function GET(request: Request) {
     const topSlabs = allSlabs.slice(0, limit);
     const markets: MarketEntry[] = [];
 
-    // Parse in batches of 3 to avoid rate limits
-    for (let i = 0; i < topSlabs.length; i += 3) {
-      const batch = topSlabs.slice(i, i + 3);
+    // Parse in parallel batches of 5 (with hints to skip resolution)
+    for (let i = 0; i < topSlabs.length; i += 5) {
+      const batch = topSlabs.slice(i, i + 5);
       const results = await Promise.allSettled(
         batch.map(async (slab) => {
-          const detail = await getSlabMarketData(slab.pubkey);
+          const detail = await getSlabMarketData(slab.pubkey, {
+            programId: slab.programId,
+            network: slab.network,
+          });
           return buildMarketEntry(detail, slab.crankAge);
         }),
       );
