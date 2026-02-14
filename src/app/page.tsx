@@ -23,7 +23,7 @@ function ViewRouter() {
 export default function Dashboard() {
   return (
     <NavigationProvider>
-      <div className="scanlines flex min-h-screen flex-col bg-[var(--terminal-bg)]">
+      <div className="scanlines crt-scanline flex min-h-screen flex-col bg-[var(--terminal-bg)]">
         <Header />
 
         <main className="flex flex-1 flex-col gap-px p-1 lg:p-1.5">
