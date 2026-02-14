@@ -40,6 +40,7 @@ export interface EcosystemData {
     parsed: number
     unparsed: number
   }
+  uniqueWallets: number
   tvl: Record<string, { amount: number; network: string }>
   networks: {
     devnet: { programs: number; slabs: number; accounts: number }

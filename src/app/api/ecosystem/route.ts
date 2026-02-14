@@ -61,6 +61,11 @@ export async function GET() {
     // Collect TVL by collateral token
     const tvlByToken: Record<string, { amount: number; network: string }> = {};
 
+    // Collect unique wallet owners
+    const uniqueOwners = new Set<string>();
+    const SYSTEM_PROGRAM = '11111111111111111111111111111111';
+    const ZERO_ADDRESS = '11111111111111111111111111111111111111111111';
+
     // Collect all slab parse jobs with hints (skip expensive resolveSlabProgram)
     const slabJobs: { pubkey: string; programId: string; network: 'devnet' | 'mainnet' }[] = [];
 
@@ -96,6 +101,11 @@ export async function GET() {
           if (pos.side === 'long') activeLongs++;
           else if (pos.side === 'short') activeShorts++;
           else flatAccounts++;
+
+          // Collect unique wallet owners
+          if (pos.owner && pos.owner !== SYSTEM_PROGRAM && pos.owner !== ZERO_ADDRESS && !pos.owner.startsWith('1111111')) {
+            uniqueOwners.add(pos.owner);
+          }
         }
 
         const mintSymbol = detail.config.collateralMint.length > 20
@@ -136,6 +146,7 @@ export async function GET() {
         parsed: parsedAccountCount,
         unparsed: unparsedAccountCount,
       },
+      uniqueWallets: uniqueOwners.size,
       tvl: tvlByToken,
       networks: {
         devnet: { programs: devnetPrograms, slabs: devnetSlabs, accounts: devnetAccounts },

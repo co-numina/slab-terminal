@@ -30,25 +30,7 @@ function programBorderColor(label: string, network: string): string {
   return "var(--terminal-dim)"
 }
 
-interface TreemapBlock {
-  market: TopMarket
-  tier: number // 0 = hero, 1 = mid, 2 = small
-}
-
-function categorizeTiers(markets: TopMarket[]): { hero: TopMarket | null; mid: TopMarket[]; small: TopMarket[]; rest: number } {
-  if (markets.length === 0) return { hero: null, mid: [], small: [], rest: 0 }
-
-  // Sort by TVL desc
-  const sorted = [...markets].sort((a, b) => b.tvl - a.tvl)
-  const hero = sorted[0]
-  const mid = sorted.slice(1, 4) // next 3
-  const small = sorted.slice(4, 7) // next 3
-  const rest = sorted.length - 7
-
-  return { hero, mid, small, rest: Math.max(0, rest) }
-}
-
-function MarketBlock({ market, isBig }: { market: TopMarket; isBig: boolean }) {
+function MarketBlock({ market, isHero }: { market: TopMarket; isHero: boolean }) {
   const { navigateToSlab } = useNavigation()
   const borderColor = programBorderColor(market.program, market.network)
   const isMainnet = market.network === "mainnet"
@@ -69,20 +51,16 @@ function MarketBlock({ market, isBig }: { market: TopMarket; isBig: boolean }) {
         </span>
         {isMainnet && <span className="text-[8px] text-[var(--terminal-amber)]">{"\u26A0"}</span>}
       </div>
-      <div className="text-[8px] text-[var(--terminal-dim)]">
-        {programShort(market.program)}
+      <div className="flex items-center gap-2 text-[8px]">
+        <span className="text-[var(--terminal-dim)]">{programShort(market.program)}</span>
+        <span className="text-[var(--terminal-green)] font-mono">
+          {formatCompact(market.tvl)} {market.collateralSymbol}
+        </span>
       </div>
-      <div className="text-[9px] font-mono">
-        <span className="text-[var(--terminal-green)]">TVL: {formatCompact(market.tvl)}</span>
-        {" "}<span className="text-[var(--terminal-dim)]">{market.collateralSymbol}</span>
-      </div>
-      {isBig && (
+      {isHero && (
         <>
-          <div className="text-[8px] text-[var(--terminal-dim)] font-mono mt-0.5">
-            {truncateAddress(market.slabAddress, 4)}
-          </div>
           {isMainnet && (
-            <div className="text-[8px] text-[var(--terminal-amber)] font-bold mt-0.5">REAL VALUE</div>
+            <div className="text-[8px] text-[var(--terminal-amber)] font-bold">REAL VALUE</div>
           )}
         </>
       )}
@@ -92,7 +70,6 @@ function MarketBlock({ market, isBig }: { market: TopMarket; isBig: boolean }) {
 
 export function MarketTreemap() {
   const { data, isLoading } = useTopMarkets()
-  const { navigateToSlab } = useNavigation()
 
   if (isLoading || !data) {
     return (
@@ -105,56 +82,91 @@ export function MarketTreemap() {
     )
   }
 
-  // Filter to only markets with TVL > 0
-  const activeMarkets = data.markets.filter(m => m.tvl > 0)
-  const { hero, mid, small, rest } = categorizeTiers(activeMarkets)
+  // Filter to markets with TVL > 0, sort by TVL desc
+  const activeMarkets = [...data.markets]
+    .filter(m => m.tvl > 0)
+    .sort((a, b) => b.tvl - a.tvl)
 
-  if (!hero) {
+  // Count zero-TVL markets
+  const zeroTvlCount = data.markets.length - activeMarkets.length
+
+  // Show up to 8 blocks
+  const displayMarkets = activeMarkets.slice(0, 8)
+  const remainingActive = activeMarkets.length - displayMarkets.length
+
+  if (displayMarkets.length === 0) {
     return (
       <TerminalPanel title="Market Landscape">
-        <div className="flex items-center justify-center py-4 text-[10px] text-[var(--terminal-dim)]">
-          No market data available
+        <div className="flex items-center justify-center py-3 text-[10px] text-[var(--terminal-dim)]">
+          No markets with TVL &gt; 0
         </div>
       </TerminalPanel>
     )
   }
 
+  // Layout: hero (first) gets full width row, rest split into rows of 4
+  const hero = displayMarkets[0]
+  const restMarkets = displayMarkets.slice(1)
+
+  // Split rest into rows of 4
+  const rows: TopMarket[][] = []
+  for (let i = 0; i < restMarkets.length; i += 4) {
+    rows.push(restMarkets.slice(i, i + 4))
+  }
+
+  const totalRest = remainingActive + zeroTvlCount
+
   return (
     <TerminalPanel title="Market Landscape">
       <div className="flex flex-col gap-px">
         {/* Row 1: Hero market (full width) */}
-        <MarketBlock market={hero} isBig={true} />
+        <MarketBlock market={hero} isHero={true} />
 
-        {/* Row 2: Mid-tier markets (3 columns) */}
-        {mid.length > 0 && (
-          <div className="grid grid-cols-3 gap-px">
-            {mid.map((m) => (
-              <MarketBlock key={m.slabAddress} market={m} isBig={false} />
+        {/* Remaining rows: 4 columns each */}
+        {rows.map((row, ri) => (
+          <div key={ri} className="grid grid-cols-4 gap-px">
+            {row.map((m) => (
+              <MarketBlock key={m.slabAddress} market={m} isHero={false} />
             ))}
-          </div>
-        )}
-
-        {/* Row 3: Small markets + rest */}
-        {(small.length > 0 || rest > 0) && (
-          <div className="grid grid-cols-3 gap-px">
-            {small.map((m) => (
-              <MarketBlock key={m.slabAddress} market={m} isBig={false} />
-            ))}
-            {rest > 0 && (
+            {/* Fill last row with rest block if needed */}
+            {ri === rows.length - 1 && totalRest > 0 && row.length < 4 && (
               <div
-                className="border border-[var(--terminal-border)] px-1.5 py-1 flex flex-col items-center justify-center"
-                style={{ backgroundColor: "var(--terminal-bg)" }}
+                className="border border-[var(--terminal-border)] px-1.5 py-1 flex flex-col items-center justify-center col-span-1"
+                style={{ backgroundColor: "var(--terminal-bg)", gridColumn: `span ${4 - row.length}` }}
               >
-                <span className="text-[8px] text-[var(--terminal-dim)]">{rest}+ more</span>
-                <span className="font-mono text-[9px] text-[var(--terminal-border)]">
-                  {"\u2591".repeat(8)}
+                <span className="text-[8px] text-[var(--terminal-dim)]">
+                  ~{totalRest} more markets
+                </span>
+                <span className="text-[7px] text-[var(--terminal-dim)]">
+                  ({zeroTvlCount} with 0 TVL)
                 </span>
               </div>
             )}
           </div>
+        ))}
+
+        {/* If all markets fit but there are still zero-TVL ones */}
+        {rows.length > 0 && totalRest > 0 && rows[rows.length - 1].length >= 4 && (
+          <div className="border border-[var(--terminal-border)] px-1.5 py-1 flex items-center justify-center"
+            style={{ backgroundColor: "var(--terminal-bg)" }}
+          >
+            <span className="text-[8px] text-[var(--terminal-dim)]">
+              ~{totalRest} more markets ({zeroTvlCount} with 0 TVL)
+            </span>
+          </div>
+        )}
+
+        {/* Edge case: no rows but have rest */}
+        {rows.length === 0 && totalRest > 0 && (
+          <div className="border border-[var(--terminal-border)] px-1.5 py-1 flex items-center justify-center"
+            style={{ backgroundColor: "var(--terminal-bg)" }}
+          >
+            <span className="text-[8px] text-[var(--terminal-dim)]">
+              ~{totalRest} more markets ({zeroTvlCount} with 0 TVL)
+            </span>
+          </div>
         )}
       </div>
-
     </TerminalPanel>
   )
 }

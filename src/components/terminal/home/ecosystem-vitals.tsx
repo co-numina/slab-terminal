@@ -1,10 +1,10 @@
 "use client"
 
 import { TerminalPanel } from "../terminal-panel"
-import type { EcosystemData, ProgramSummary } from "@/hooks/use-ecosystem"
+import type { EcosystemData } from "@/hooks/use-ecosystem"
 import { useTopMarkets, type TopMarket } from "@/hooks/use-top-markets"
 
-const BAR_CHARS = 50
+const BAR_CHARS = 55
 
 // ── Shared helpers ──────────────────────────────────────────────
 
@@ -20,12 +20,12 @@ function programColor(label: string, network: string): string {
 
 function programShort(label: string): string {
   const l = label.toLowerCase()
-  if (l.includes("small")) return "s"
-  if (l.includes("medium")) return "m"
-  if (l.includes("large")) return "l"
+  if (l.includes("small")) return "launch-s"
+  if (l.includes("medium")) return "launch-m"
+  if (l.includes("large")) return "launch-l"
   if (l.includes("toly")) return "toly"
   if (l.includes("sov")) return "SOV"
-  return label.slice(0, 4)
+  return label.slice(0, 8)
 }
 
 function formatCompact(n: number): string {
@@ -36,7 +36,15 @@ function formatCompact(n: number): string {
   return n.toFixed(3)
 }
 
-// ── TVL Row ─────────────────────────────────────────────────────
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <div className="text-[9px] font-bold text-[var(--terminal-cyan)] tracking-wider uppercase">
+      {label}
+    </div>
+  )
+}
+
+// ── TVL Section ─────────────────────────────────────────────────
 
 interface TVLSegment {
   label: string
@@ -67,18 +75,17 @@ function buildTVLSegments(markets: TopMarket[]): TVLSegment[] {
   return segments
 }
 
-function TVLRow({ markets }: { markets: TopMarket[] }) {
+function TVLSection({ markets }: { markets: TopMarket[] }) {
   const segments = buildTVLSegments(markets)
   const totalTVL = segments.reduce((s, seg) => s + seg.tvl, 0)
 
   if (totalTVL === 0) {
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] text-[var(--terminal-dim)] w-8 shrink-0">TVL</span>
-        <span className="font-mono text-[10px] text-[var(--terminal-dim)]">
-          {"\u2591".repeat(BAR_CHARS)}
-        </span>
-        <span className="text-[8px] text-[var(--terminal-dim)]">no data</span>
+      <div className="flex flex-col gap-0.5">
+        <SectionLabel label="TVL Distribution" />
+        <div className="font-mono text-[10px] text-[var(--terminal-dim)]">
+          {"\u2591".repeat(BAR_CHARS)} no TVL data
+        </div>
       </div>
     )
   }
@@ -95,29 +102,42 @@ function TVLRow({ markets }: { markets: TopMarket[] }) {
     usedChars += charWidths[i].chars
   }
 
-  // Build legend string
-  const legend = segments
-    .map(s => `${s.label}:${formatCompact(s.tvl)}`)
-    .join(" ")
-
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[9px] text-[var(--terminal-dim)] w-8 shrink-0 font-bold">TVL</span>
-      <span className="font-mono text-[10px] leading-none whitespace-nowrap">
+    <div className="flex flex-col gap-0.5">
+      <SectionLabel label="TVL Distribution" />
+      {/* Bar */}
+      <div className="font-mono text-[11px] leading-none whitespace-nowrap overflow-hidden">
         {charWidths.map(({ chars, seg }, i) => (
           <span key={i} style={{ color: seg.color }}>{"\u2588".repeat(chars)}</span>
         ))}
-      </span>
-      <span className="text-[8px] text-[var(--terminal-dim)] whitespace-nowrap truncate">
-        {legend}
-      </span>
+      </div>
+      {/* Annotation line */}
+      <div className="font-mono text-[9px] leading-none whitespace-nowrap overflow-hidden flex">
+        {charWidths.filter(cw => cw.chars >= 2).map(({ chars, seg }, i) => {
+          const pct = ((seg.tvl / totalTVL) * 100).toFixed(0)
+          const labelText = `${seg.label} (${pct}%)`
+          return (
+            <span
+              key={i}
+              style={{
+                width: `${(chars / BAR_CHARS) * 100}%`,
+                color: seg.color,
+                display: "inline-block",
+              }}
+              className="truncate pr-1"
+            >
+              {seg.network === "mainnet" ? `${labelText} \u26A0` : labelText}
+            </span>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
-// ── Balance Row ─────────────────────────────────────────────────
+// ── Balance Section ─────────────────────────────────────────────
 
-function BalanceRow({ data }: { data: EcosystemData }) {
+function BalanceSection({ data }: { data: EcosystemData }) {
   const longsCount = data.positions.activeLongs
   const shortsCount = data.positions.activeShorts
   const totalActive = longsCount + shortsCount
@@ -125,19 +145,25 @@ function BalanceRow({ data }: { data: EcosystemData }) {
   if (totalActive === 0) {
     const halfChars = Math.floor(BAR_CHARS / 2)
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] text-[var(--terminal-dim)] w-8 shrink-0 font-bold">BAL</span>
-        <span className="font-mono text-[10px] leading-none whitespace-nowrap">
+      <div className="flex flex-col gap-0.5">
+        <SectionLabel label="Position Balance" />
+        <div className="font-mono text-[11px] leading-none whitespace-nowrap">
+          <span className="text-[var(--terminal-dim)]">SHORT </span>
           <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(halfChars)}</span>
           <span style={{ color: "var(--terminal-dim)" }}>{"\u2502"}</span>
           <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(halfChars)}</span>
-        </span>
-        <span className="text-[8px] text-[var(--terminal-dim)]">FLAT</span>
+          <span className="text-[var(--terminal-dim)]"> LONG</span>
+        </div>
+        <div className="flex justify-between text-[9px] text-[var(--terminal-dim)]">
+          <span>0 positions</span>
+          <span>NET: FLAT</span>
+          <span>0 positions</span>
+        </div>
       </div>
     )
   }
 
-  const halfBar = Math.floor(BAR_CHARS / 2)
+  const halfBar = Math.floor((BAR_CHARS - 1) / 2) // -1 for center divider
   const maxSide = Math.max(longsCount, shortsCount, 1)
   const shortWidth = Math.max(1, Math.round((shortsCount / maxSide) * halfBar))
   const longWidth = Math.max(1, Math.round((longsCount / maxSide) * halfBar))
@@ -145,32 +171,49 @@ function BalanceRow({ data }: { data: EcosystemData }) {
   const longEmpty = halfBar - longWidth
 
   const net = longsCount - shortsCount
-  const netLabel = net > 0 ? `+${net}L` : net < 0 ? `${net}S` : "="
+  const netLabel = net > 0 ? `NET: +${net} LONG` : net < 0 ? `NET: ${net} SHORT` : "NET: BALANCED"
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[9px] text-[var(--terminal-dim)] w-8 shrink-0 font-bold">BAL</span>
-      <span className="font-mono text-[10px] leading-none whitespace-nowrap">
+    <div className="flex flex-col gap-0.5">
+      <SectionLabel label="Position Balance" />
+      {/* Bar */}
+      <div className="font-mono text-[11px] leading-none whitespace-nowrap">
+        <span className="text-[var(--terminal-dim)] text-[9px]">SHORT </span>
         <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(shortEmpty)}</span>
         <span style={{ color: "var(--terminal-red)" }}>{"\u2588".repeat(shortWidth)}</span>
         <span style={{ color: "var(--terminal-dim)" }}>{"\u2502"}</span>
         <span style={{ color: "var(--terminal-green)" }}>{"\u2588".repeat(longWidth)}</span>
         <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(longEmpty)}</span>
-      </span>
-      <span className="text-[8px] text-[var(--terminal-dim)] whitespace-nowrap">
-        {shortsCount}S/{longsCount}L{" "}
+        <span className="text-[var(--terminal-dim)] text-[9px]"> LONG</span>
+      </div>
+      {/* Annotation: left-aligned shorts, centered NET, right-aligned longs */}
+      <div className="flex justify-between text-[9px]">
+        <span className="text-[var(--terminal-red)]">
+          {shortsCount} position{shortsCount !== 1 ? "s" : ""}
+        </span>
         <span style={{ color: net > 0 ? "var(--terminal-green)" : net < 0 ? "var(--terminal-red)" : "var(--terminal-dim)" }}>
           {netLabel}
         </span>
-      </span>
+        <span className="text-[var(--terminal-green)]">
+          {longsCount} position{longsCount !== 1 ? "s" : ""}
+        </span>
+      </div>
     </div>
   )
 }
 
-// ── Insurance Row ───────────────────────────────────────────────
+// ── Insurance Section ───────────────────────────────────────────
 
-function InsuranceRow({ markets }: { markets: TopMarket[] }) {
-  // Aggregate insurance estimate per program
+interface InsuranceEntry {
+  label: string
+  network: "devnet" | "mainnet"
+  ratio: number
+  isAdminBurned: boolean
+  note: string
+  color: string
+}
+
+function buildInsuranceEntries(markets: TopMarket[]): InsuranceEntry[] {
   const byProgram = new Map<string, { tvl: number; label: string; network: "devnet" | "mainnet"; markets: number }>()
   for (const m of markets) {
     const existing = byProgram.get(m.program)
@@ -178,36 +221,74 @@ function InsuranceRow({ markets }: { markets: TopMarket[] }) {
     else byProgram.set(m.program, { tvl: m.tvl, label: m.program, network: m.network, markets: 1 })
   }
 
-  // Estimate a composite insurance ratio
-  let totalTVL = 0
-  let weightedRatio = 0
-  let hasSOV = false
+  const entries: InsuranceEntry[] = []
   for (const [, d] of byProgram) {
+    if (d.tvl <= 0) continue
     const isSOV = d.label.toLowerCase().includes("sov")
     const isToly = d.label.toLowerCase().includes("toly")
     const ratio = isSOV ? 12 : isToly ? 9 : d.markets > 10 ? 6 : 2
-    weightedRatio += ratio * d.tvl
-    totalTVL += d.tvl
-    if (isSOV) hasSOV = true
-  }
-  const avgRatio = totalTVL > 0 ? weightedRatio / totalTVL : 0
-  const maxRatio = 20
-  const fillChars = Math.max(0, Math.min(BAR_CHARS, Math.round((avgRatio / maxRatio) * BAR_CHARS)))
-  const emptyChars = BAR_CHARS - fillChars
+    const color = ratio >= 10 ? "var(--terminal-green)" : ratio >= 5 ? "var(--terminal-amber)" : "var(--terminal-red)"
 
-  const color = avgRatio >= 10 ? "var(--terminal-green)" : avgRatio >= 5 ? "var(--terminal-amber)" : "var(--terminal-red)"
+    let note = `${formatCompact(d.tvl)} TVL across ${d.markets} markets`
+    if (isSOV) note = "accruing \u00B7 admin burned"
+
+    entries.push({
+      label: programShort(d.label),
+      network: d.network,
+      ratio,
+      isAdminBurned: isSOV,
+      note,
+      color,
+    })
+  }
+
+  entries.sort((a, b) => b.ratio - a.ratio)
+  return entries
+}
+
+const INS_BAR_CHARS = 30
+
+function InsuranceSection({ markets }: { markets: TopMarket[] }) {
+  const entries = buildInsuranceEntries(markets)
+  const hasSOV = entries.some(e => e.isAdminBurned)
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[9px] text-[var(--terminal-dim)] w-8 shrink-0 font-bold">INS</span>
-      <span className="font-mono text-[10px] leading-none whitespace-nowrap">
-        <span style={{ color }}>{"\u2588".repeat(fillChars)}</span>
-        <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(emptyChars)}</span>
-      </span>
-      <span className="text-[8px] text-[var(--terminal-dim)] whitespace-nowrap">
-        ~{avgRatio.toFixed(0)}% avg
-        {hasSOV && <span className="text-[var(--terminal-amber)]"> {"\u26A0"}SOV locked</span>}
-      </span>
+    <div className="flex flex-col gap-0.5">
+      <SectionLabel label="Insurance Reserves" />
+      {entries.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          {entries.map((entry, i) => {
+            const maxRatio = 20
+            const fillChars = Math.max(0, Math.min(INS_BAR_CHARS, Math.round((entry.ratio / maxRatio) * INS_BAR_CHARS)))
+            const emptyChars = INS_BAR_CHARS - fillChars
+            const isMainnet = entry.network === "mainnet"
+
+            return (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-[9px] font-bold w-16 shrink-0" style={{
+                  color: isMainnet ? "var(--terminal-amber)" : "var(--terminal-green)"
+                }}>
+                  {entry.label}{isMainnet ? " \u26A0" : ""}
+                </span>
+                <span className="font-mono text-[10px] leading-none whitespace-nowrap">
+                  <span style={{ color: entry.color }}>{"\u2588".repeat(fillChars)}</span>
+                  <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(emptyChars)}</span>
+                </span>
+                <span className="text-[8px] text-[var(--terminal-dim)] whitespace-nowrap">
+                  {entry.note}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="text-[9px] text-[var(--terminal-dim)]">loading reserves...</div>
+      )}
+      {hasSOV && (
+        <div className="text-[8px] text-[var(--terminal-amber)] mt-0.5">
+          {"\u26A0"} SOV mainnet insurance locked forever (admin burned)
+        </div>
+      )}
     </div>
   )
 }
@@ -220,10 +301,10 @@ export function EcosystemVitals({ data }: { data: EcosystemData }) {
 
   return (
     <TerminalPanel title="Ecosystem Vitals">
-      <div className="flex flex-col gap-1.5">
-        <TVLRow markets={markets} />
-        <BalanceRow data={data} />
-        <InsuranceRow markets={markets} />
+      <div className="flex flex-col gap-3">
+        <TVLSection markets={markets} />
+        <BalanceSection data={data} />
+        <InsuranceSection markets={markets} />
       </div>
     </TerminalPanel>
   )

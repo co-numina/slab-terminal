@@ -106,6 +106,14 @@ export function EcosystemOverview({ data }: { data: EcosystemData }) {
           )}
         </StatCard>
 
+        {/* Unique Wallets */}
+        <StatCard label="Wallets">
+          <span className="text-sm font-bold text-[var(--terminal-green)]">
+            {data.uniqueWallets ?? 0}
+          </span>
+          <span className="text-[var(--terminal-dim)]">unique owners</span>
+        </StatCard>
+
         {/* Mainnet */}
         <StatCard label="Mainnet">
           {networks.mainnet.programs > 0 ? (

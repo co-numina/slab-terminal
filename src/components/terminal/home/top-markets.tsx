@@ -105,6 +105,7 @@ function MarketRow({ market, rank }: { market: TopMarket; rank: number }) {
 
 export function TopMarkets() {
   const { data, isLoading } = useTopMarkets()
+  const { setActiveView } = useNavigation()
   const [sortKey, setSortKey] = useState<SortKey>("tvl")
 
   if (isLoading || !data) {
@@ -141,7 +142,7 @@ export function TopMarkets() {
       </div>
 
       {/* Table */}
-      <div className="max-h-[280px] overflow-y-auto mt-0.5">
+      <div className="max-h-[320px] overflow-y-auto mt-0.5">
         <table className="w-full text-[10px]">
           <thead>
             <tr className="text-[var(--terminal-dim)] text-left uppercase">
@@ -163,6 +164,17 @@ export function TopMarkets() {
         </table>
       </div>
 
+      <div className="mt-1 flex items-center justify-between text-[8px]">
+        <span className="text-[var(--terminal-dim)]">
+          Showing {data.count} of {data.totalCandidates}
+        </span>
+        <button
+          onClick={() => setActiveView("radar")}
+          className="text-[var(--terminal-cyan)] hover:text-[var(--terminal-green)] transition-colors cursor-pointer"
+        >
+          View all in RADAR {"\u2192"}
+        </button>
+      </div>
     </TerminalPanel>
   )
 }

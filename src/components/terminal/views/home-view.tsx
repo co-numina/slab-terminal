@@ -9,6 +9,7 @@ import { SlabUtilization } from "../home/slab-utilization"
 import { RiskMonitor } from "../home/risk-monitor"
 import { NetworkBreakdown } from "../home/network-breakdown"
 import { MarketTreemap } from "../home/market-treemap"
+import { RecentActivity } from "../home/recent-activity"
 import { TerminalPanel } from "../terminal-panel"
 
 /** Skeleton placeholder for panels that need ecosystem data */
@@ -61,7 +62,10 @@ export function HomeView() {
         )}
       </div>
 
-      {/* Row 5: Market Landscape (full width) */}
+      {/* Row 5: Recent Activity (full width) */}
+      <RecentActivity />
+
+      {/* Row 6: Market Landscape (full width) */}
       <MarketTreemap />
     </div>
   )
