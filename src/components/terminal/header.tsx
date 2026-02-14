@@ -31,7 +31,10 @@ export function Header() {
       <div className="flex flex-col gap-2 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
         {/* Logo + Label */}
         <div className="flex items-center gap-3">
-          <pre className="hidden text-[7px] leading-[1.15] text-[var(--terminal-green)] md:block md:text-[8px] lg:text-[9px]">
+          <pre
+            className="hidden text-[var(--terminal-green)] md:block"
+            style={{ fontSize: '11px', lineHeight: '11px', fontFamily: '"Courier New", monospace' }}
+          >
             {ASCII_LOGO}
           </pre>
           <span className="block text-base font-bold text-[var(--terminal-green)] md:hidden">

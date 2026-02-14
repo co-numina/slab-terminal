@@ -4,14 +4,14 @@ import { TerminalPanel } from "../terminal-panel"
 
 // ── Section Component ───────────────────────────────────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, first }: { title: string; children: React.ReactNode; first?: boolean }) {
   return (
-    <div className="mb-4">
+    <div className={first ? "pb-4" : "pt-4 pb-4"}>
       <div className="flex items-center gap-2 mb-1.5">
         <span className="text-[var(--terminal-green)] text-[11px] font-bold uppercase tracking-wider">{"\u2588"} {title}</span>
         <span className="flex-1 border-b border-dotted border-[var(--terminal-border)]" />
       </div>
-      <div className="pl-3 text-[10px] leading-relaxed text-[var(--terminal-text)] font-mono space-y-2">
+      <div className="pl-3 text-[10px] leading-relaxed text-[var(--terminal-text)] font-mono space-y-1.5">
         {children}
       </div>
     </div>
@@ -20,9 +20,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function SubSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mt-2">
+    <div className="mt-1.5">
       <span className="text-[var(--terminal-cyan)] text-[10px] font-bold uppercase">{"\u251C\u2500"} {title}</span>
-      <div className="pl-3 mt-0.5 space-y-1">
+      <div className="pl-3 mt-0.5 space-y-0.5">
         {children}
       </div>
     </div>
@@ -74,7 +74,7 @@ export function DocsView() {
       <TerminalPanel title="SLAB SCOPE — Technical Documentation">
         <div className="space-y-0">
           {/* ── Overview ──────────────────────────────────────────── */}
-          <Section title="Overview">
+          <Section title="Overview" first>
             <P>
               SLAB SCOPE is a real-time monitoring dashboard for the Percolator perpetual futures
               ecosystem on Solana. It scans all known Percolator program deployments across devnet
@@ -137,26 +137,12 @@ export function DocsView() {
           </Section>
 
           {/* ── Architecture ──────────────────────────────────────── */}
+
           <Section title="Architecture">
             <P>
               SLAB SCOPE is built as a Next.js 14 application with server-side API routes that
               perform all RPC calls and parsing, and a React frontend that polls those APIs.
             </P>
-
-            <Code>{`
-  Browser (React)          Server (Next.js API Routes)         Solana RPC
-  ─────────────────        ──────────────────────────          ──────────
-  useEcosystem() ────────► /api/ecosystem ──────────────────► getProgramAccounts()
-  useTopMarkets() ───────► /api/top-markets ───────────────► getMultipleAccountsInfo()
-  useSlabDetail() ───────► /api/slab/[address] ────────────► getAccountInfo()
-                           /api/radar ──────────────────────► getProgramAccounts()
-                           /api/positions ──────────────────► getAccountInfo()
-                           /api/liquidations ───────────────► getAccountInfo()
-                                    │
-                                    ├──► DexScreener API (USD prices)
-                                    ├──► Jupiter API (token symbols)
-                                    └──► Metaplex (fallback metadata)
-            `.trim()}</Code>
 
             <SubSection title="Data Flow">
               <Bullet label="Discovery">
@@ -185,6 +171,7 @@ export function DocsView() {
           </Section>
 
           {/* ── Program Registry ──────────────────────────────────── */}
+
           <Section title="Program Registry">
             <P>
               SLAB SCOPE monitors all known Percolator deployments. Each program is a separate
@@ -210,6 +197,7 @@ export function DocsView() {
           </Section>
 
           {/* ── Dashboard Views ───────────────────────────────────── */}
+
           <Section title="Dashboard Views">
             <SubSection title="HOME">
               <P>
@@ -240,6 +228,7 @@ export function DocsView() {
           </Section>
 
           {/* ── Performance ───────────────────────────────────────── */}
+
           <Section title="Performance Optimizations">
             <P>
               The system is heavily optimized to minimize RPC calls and latency:
@@ -267,6 +256,7 @@ export function DocsView() {
           </Section>
 
           {/* ── On-Chain Data Format ──────────────────────────────── */}
+
           <Section title="On-Chain Slab Format">
             <P>
               Each slab account is a contiguous byte array with three sections:
@@ -298,6 +288,7 @@ export function DocsView() {
           </Section>
 
           {/* ── Tech Stack ────────────────────────────────────────── */}
+
           <Section title="Tech Stack">
             <Bullet label="Frontend">Next.js 14, React 18, Tailwind CSS, SWR</Bullet>
             <Bullet label="Backend">Next.js API Routes (serverless), Node.js</Bullet>
@@ -309,6 +300,7 @@ export function DocsView() {
           </Section>
 
           {/* ── File Structure ────────────────────────────────────── */}
+
           <Section title="Key Files">
             <Code>{`
   src/
