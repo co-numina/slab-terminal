@@ -5,12 +5,15 @@ import { Header } from "@/components/terminal/header"
 import { Footer } from "@/components/terminal/footer"
 import { DashboardView } from "@/components/terminal/views/dashboard-view"
 import { RadarView } from "@/components/terminal/views/radar-view"
+import { SlabDetailView } from "@/components/terminal/views/slab-detail-view"
 
 function ViewRouter() {
   const { activeView } = useNavigation()
   switch (activeView) {
     case "radar":
       return <RadarView />
+    case "slab":
+      return <SlabDetailView />
     case "dashboard":
     default:
       return <DashboardView />

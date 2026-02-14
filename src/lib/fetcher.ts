@@ -1,14 +1,17 @@
 /**
  * Shared data fetcher — fetches and caches slab data with auto-discovery.
  * getAllMarketData() fetches ALL active slabs using batched RPC calls.
+ * getSlabMarketData() fetches a single slab from any network for drill-down.
  */
 import { PublicKey, type Connection } from '@solana/web3.js';
 import { CACHE_DURATIONS } from './constants';
 import { getConnection, getCached, setCache } from './connection';
-import { parseConfig, parseParams, parseEngine, parseAllAccounts } from './percolator';
-import { getOraclePrice, OraclePrice } from './oracle';
+import { parseHeader, parseConfig, parseParams, parseEngine, parseAllAccounts, calculateFundingRate, computeMarginMetrics, estimateLiquidationPrice } from './percolator';
+import { getOraclePrice, getEffectiveOraclePrice, OraclePrice } from './oracle';
 import { discoverAllSlabs, DiscoveredSlab } from './discovery';
-import { MarketConfig, RiskParams, EngineState, Account } from './types';
+import { getNetworkConnection } from './connections';
+import { PROGRAM_REGISTRY, type NetworkId } from './registry';
+import { MarketConfig, RiskParams, EngineState, Account, AccountKind } from './types';
 
 export interface MarketData {
   slabData: Buffer;
@@ -212,4 +215,421 @@ export async function getMarketData(): Promise<MarketData> {
     throw new Error('No active slabs available');
   }
   return all.slabs[0];
+}
+
+// ============================================================================
+// Single-slab fetcher — program-agnostic drill-down
+// ============================================================================
+
+export interface SlabDetail {
+  slabPubkey: string;
+  programId: string;
+  programLabel: string;
+  network: NetworkId;
+  slabSize: number;
+
+  // Parsed state
+  header: {
+    version: number;
+    bump: number;
+    flags: number;
+    resolved: boolean;
+    admin: string;
+  };
+  config: {
+    collateralMint: string;
+    vaultPubkey: string;
+    indexFeedId: string;
+    invert: number;
+    unitScale: number;
+    maxStalenessSlots: string;
+    confFilterBps: number;
+    fundingHorizonSlots: string;
+    fundingKBps: string;
+    fundingMaxPremiumBps: string;
+    fundingMaxBpsPerSlot: string;
+    oracleAuthority: string;
+    lastEffectivePriceE6: string;
+  };
+  engine: {
+    vault: string;
+    insuranceFundBalance: string;
+    insuranceFeeRevenue: string;
+    totalOpenInterest: string;
+    netLpPos: string;
+    lpSumAbs: string;
+    numUsedAccounts: number;
+    nextAccountId: string;
+    lastCrankSlot: number;
+    lastFundingSlot: string;
+    fundingRateBpsPerSlotLast: string;
+    fundingIndexQpbE6: string;
+    lifetimeLiquidations: number;
+    lifetimeForceCloses: number;
+    liqCursor: number;
+    gcCursor: number;
+    crankCursor: number;
+  };
+  params: {
+    maintenanceMarginBps: number;
+    initialMarginBps: number;
+    tradingFeeBps: number;
+    liquidationFeeBps: number;
+    maxAccounts: number;
+    warmupPeriodSlots: string;
+    maxCrankStalenessSlots: string;
+  };
+
+  // Market metrics
+  oraclePriceE6: string;
+  solUsdPrice: number;
+  invertedMarket: boolean;
+  maxAccountCapacity: number;
+
+  // Funding
+  fundingRate: {
+    rateBpsPerSlot: number;
+    rateBpsPerHour: number;
+    direction: 'longs_pay' | 'shorts_pay' | 'neutral';
+  };
+
+  // TVL
+  vaultBalanceSol: number;
+  tvlUsd: number;
+  insuranceFundSol: number;
+  openInterestSol: number;
+
+  // Positions
+  positions: SlabPosition[];
+  lps: SlabLP[];
+
+  // Summary
+  summary: {
+    totalPositions: number;
+    totalLPs: number;
+    totalLongs: number;
+    totalShorts: number;
+    totalLongNotional: number;
+    totalShortNotional: number;
+    liquidatable: number;
+    atRisk: number;
+  };
+
+  slot: number;
+  timestamp: string;
+}
+
+export interface SlabPosition {
+  accountIndex: number;
+  accountId: string;
+  owner: string;
+  side: 'long' | 'short' | 'flat';
+  size: number;
+  rawSize: string;
+  entryPrice: number;
+  entryPriceE6: string;
+  markPrice: number;
+  unrealizedPnl: number;
+  realizedPnl: number;
+  unrealizedPnlPercent: number;
+  collateral: number;
+  effectiveCapital: number;
+  marginHealth: number;
+  marginRatioBps: number;
+  liquidationPrice: number;
+  isLP: boolean;
+  status: 'safe' | 'at_risk' | 'liquidatable';
+}
+
+export interface SlabLP {
+  accountIndex: number;
+  accountId: string;
+  owner: string;
+  collateral: number;
+  pnl: number;
+  effectiveCapital: number;
+  positionSize: string;
+  positionNotional: number;
+  matcherProgram: string;
+  matcherContext: string;
+}
+
+/**
+ * Detect which program owns a slab by its address.
+ * Fetches the account once per network, then matches the owner against registry.
+ * Returns { programEntry, network, connection } or null.
+ */
+async function resolveSlabProgram(slabAddress: string): Promise<{
+  entry: (typeof PROGRAM_REGISTRY)[number];
+  connection: Connection;
+  accountData: Buffer;
+} | null> {
+  const pubkey = new PublicKey(slabAddress);
+
+  // Group registry entries by network
+  const networkEntries = new Map<NetworkId, (typeof PROGRAM_REGISTRY)[number][]>();
+  for (const entry of PROGRAM_REGISTRY) {
+    const existing = networkEntries.get(entry.network) ?? [];
+    existing.push(entry);
+    networkEntries.set(entry.network, existing);
+  }
+
+  // Try each network once (devnet first, most likely)
+  for (const [network, entries] of networkEntries) {
+    try {
+      const connection = getNetworkConnection(network);
+      const info = await connection.getAccountInfo(pubkey);
+      if (!info) continue;
+
+      // Match the owner against all programs on this network
+      const ownerStr = info.owner.toBase58();
+      const match = entries.find((e) => e.programId === ownerStr);
+      if (match) {
+        return {
+          entry: match,
+          connection,
+          accountData: Buffer.from(info.data),
+        };
+      }
+    } catch {
+      // Network error, try next
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetch full market data for a SINGLE slab from any program/network.
+ * This is the core of the drill-down view.
+ * Caches for 5s per slab address.
+ */
+export async function getSlabMarketData(slabAddress: string): Promise<SlabDetail> {
+  const cacheKey = `slab_detail_${slabAddress}`;
+  const cached = getCached<SlabDetail>(cacheKey, CACHE_DURATIONS.SLAB);
+  if (cached) return cached;
+
+  // Resolve which program/network owns this slab
+  const resolved = await resolveSlabProgram(slabAddress);
+  if (!resolved) {
+    throw new Error(`Slab not found on any known program: ${slabAddress}`);
+  }
+
+  const { entry, connection, accountData } = resolved;
+  const slabData = accountData;
+
+  // Parse the full slab
+  const header = parseHeader(slabData);
+  const config = parseConfig(slabData);
+  const params = parseParams(slabData);
+  const engine = parseEngine(slabData);
+  const allAccounts = parseAllAccounts(slabData);
+
+  // Get slot
+  const slot = await connection.getSlot('confirmed').catch(() => 0);
+
+  // Oracle price: try the slab's effective price first
+  let oraclePriceE6: bigint;
+  let solUsdPrice: number;
+
+  if (config.lastEffectivePriceE6 > 0n) {
+    oraclePriceE6 = config.lastEffectivePriceE6;
+    solUsdPrice = getEffectiveOraclePrice(config.lastEffectivePriceE6, config.invert);
+  } else {
+    oraclePriceE6 = 0n;
+    solUsdPrice = 0;
+  }
+
+  // For devnet Toly, try the real oracle too
+  if (entry.network === 'devnet' && entry.oracleAddress) {
+    try {
+      const oracleData = await getOraclePrice(connection);
+      oraclePriceE6 = oracleData.invertedPriceE6;
+      solUsdPrice = oracleData.solUsdPrice;
+    } catch {
+      // Keep effective price
+    }
+  }
+
+  // Vault balance
+  let vaultBalanceSol = 0;
+  try {
+    const vaultBal = await connection.getTokenAccountBalance(config.vaultPubkey);
+    vaultBalanceSol = Number(vaultBal.value.amount) / 1e9;
+  } catch {
+    // Vault may not exist or be a different token
+  }
+
+  // Funding rate
+  const fundingRate = calculateFundingRate(engine, config, oraclePriceE6);
+
+  // Open interest in SOL
+  const oiRaw = oraclePriceE6 > 0n
+    ? Number(engine.totalOpenInterest * oraclePriceE6 / 1_000_000n) / 1e9
+    : 0;
+
+  // Max account capacity for this slab size
+  const ENGINE_OFF = 392;
+  const ENGINE_ACCOUNTS_OFF = 9136;
+  const ACCOUNT_SIZE = 240;
+  const accountsEnd = slabData.length - ENGINE_OFF - ENGINE_ACCOUNTS_OFF;
+  const maxAccountCapacity = accountsEnd > 0 ? Math.floor(accountsEnd / ACCOUNT_SIZE) : 0;
+
+  // Parse positions and LPs
+  const positions: SlabPosition[] = [];
+  const lps: SlabLP[] = [];
+
+  for (const { idx, account } of allAccounts) {
+    if (account.kind === AccountKind.LP) {
+      const collateral = Number(account.capital) / 1e9;
+      const pnl = Number(account.pnl) / 1e9;
+      const absPos = account.positionSize < 0n ? -account.positionSize : account.positionSize;
+      const posNotional = oraclePriceE6 > 0n
+        ? Number(absPos * oraclePriceE6 / 1_000_000n) / 1e9 * solUsdPrice
+        : 0;
+
+      lps.push({
+        accountIndex: idx,
+        accountId: account.accountId.toString(),
+        owner: account.owner.toBase58(),
+        collateral,
+        pnl,
+        effectiveCapital: collateral + pnl,
+        positionSize: account.positionSize.toString(),
+        positionNotional: posNotional,
+        matcherProgram: account.matcherProgram.toBase58(),
+        matcherContext: account.matcherContext.toBase58(),
+      });
+    }
+
+    // All accounts get position entries (including LPs)
+    const metrics = computeMarginMetrics(account, oraclePriceE6, params);
+    const liqPriceE6 = estimateLiquidationPrice(account, params);
+    const liquidationPrice = liqPriceE6 > 0 ? 1_000_000 / liqPriceE6 : 0;
+    const entryPrice = Number(account.entryPrice) > 0
+      ? 1_000_000 / Number(account.entryPrice)
+      : 0;
+    const collateral = Number(account.capital) / 1e9;
+    const unrealizedPnlSol = Number(metrics.unrealizedPnl) / 1e9;
+
+    let side: 'long' | 'short' | 'flat';
+    if (account.positionSize === 0n) side = 'flat';
+    else if (account.positionSize > 0n) side = 'short'; // inverted market
+    else side = 'long';
+
+    positions.push({
+      accountIndex: idx,
+      accountId: account.accountId.toString(),
+      owner: account.owner.toBase58(),
+      side,
+      size: Number(metrics.notionalLamports) / 1e9,
+      rawSize: account.positionSize.toString(),
+      entryPrice,
+      entryPriceE6: account.entryPrice.toString(),
+      markPrice: solUsdPrice,
+      unrealizedPnl: unrealizedPnlSol,
+      realizedPnl: Number(account.pnl) / 1e9,
+      unrealizedPnlPercent: collateral > 0 ? (unrealizedPnlSol / collateral) * 100 : 0,
+      collateral,
+      effectiveCapital: Number(metrics.effectiveCapital) / 1e9,
+      marginHealth: metrics.health,
+      marginRatioBps: metrics.marginRatioBps,
+      liquidationPrice,
+      isLP: account.kind === AccountKind.LP,
+      status: metrics.status,
+    });
+  }
+
+  const longs = positions.filter(p => p.side === 'long');
+  const shorts = positions.filter(p => p.side === 'short');
+
+  const detail: SlabDetail = {
+    slabPubkey: slabAddress,
+    programId: entry.programId,
+    programLabel: entry.label,
+    network: entry.network,
+    slabSize: slabData.length,
+
+    header: {
+      version: header.version,
+      bump: header.bump,
+      flags: header.flags,
+      resolved: header.resolved,
+      admin: header.admin.toBase58(),
+    },
+    config: {
+      collateralMint: config.collateralMint.toBase58(),
+      vaultPubkey: config.vaultPubkey.toBase58(),
+      indexFeedId: config.indexFeedId.toBase58(),
+      invert: config.invert,
+      unitScale: config.unitScale,
+      maxStalenessSlots: config.maxStalenessSlots.toString(),
+      confFilterBps: config.confFilterBps,
+      fundingHorizonSlots: config.fundingHorizonSlots.toString(),
+      fundingKBps: config.fundingKBps.toString(),
+      fundingMaxPremiumBps: config.fundingMaxPremiumBps.toString(),
+      fundingMaxBpsPerSlot: config.fundingMaxBpsPerSlot.toString(),
+      oracleAuthority: config.oracleAuthority.toBase58(),
+      lastEffectivePriceE6: config.lastEffectivePriceE6.toString(),
+    },
+    engine: {
+      vault: engine.vault.toString(),
+      insuranceFundBalance: engine.insuranceFund.balance.toString(),
+      insuranceFeeRevenue: engine.insuranceFund.feeRevenue.toString(),
+      totalOpenInterest: engine.totalOpenInterest.toString(),
+      netLpPos: engine.netLpPos.toString(),
+      lpSumAbs: engine.lpSumAbs.toString(),
+      numUsedAccounts: engine.numUsedAccounts,
+      nextAccountId: engine.nextAccountId.toString(),
+      lastCrankSlot: Number(engine.lastCrankSlot),
+      lastFundingSlot: engine.lastFundingSlot.toString(),
+      fundingRateBpsPerSlotLast: engine.fundingRateBpsPerSlotLast.toString(),
+      fundingIndexQpbE6: engine.fundingIndexQpbE6.toString(),
+      lifetimeLiquidations: Number(engine.lifetimeLiquidations),
+      lifetimeForceCloses: Number(engine.lifetimeForceCloses),
+      liqCursor: engine.liqCursor,
+      gcCursor: engine.gcCursor,
+      crankCursor: engine.crankCursor,
+    },
+    params: {
+      maintenanceMarginBps: Number(params.maintenanceMarginBps),
+      initialMarginBps: Number(params.initialMarginBps),
+      tradingFeeBps: Number(params.tradingFeeBps),
+      liquidationFeeBps: Number(params.liquidationFeeBps),
+      maxAccounts: Number(params.maxAccounts),
+      warmupPeriodSlots: params.warmupPeriodSlots.toString(),
+      maxCrankStalenessSlots: params.maxCrankStalenessSlots.toString(),
+    },
+
+    oraclePriceE6: oraclePriceE6.toString(),
+    solUsdPrice,
+    invertedMarket: config.invert === 1,
+    maxAccountCapacity,
+
+    fundingRate,
+
+    vaultBalanceSol,
+    tvlUsd: vaultBalanceSol * solUsdPrice,
+    insuranceFundSol: Number(engine.insuranceFund.balance) / 1e9,
+    openInterestSol: oiRaw,
+
+    positions,
+    lps,
+
+    summary: {
+      totalPositions: positions.length,
+      totalLPs: lps.length,
+      totalLongs: longs.length,
+      totalShorts: shorts.length,
+      totalLongNotional: longs.reduce((s, p) => s + p.size, 0),
+      totalShortNotional: shorts.reduce((s, p) => s + p.size, 0),
+      liquidatable: positions.filter(p => p.status === 'liquidatable').length,
+      atRisk: positions.filter(p => p.status === 'at_risk').length,
+    },
+
+    slot,
+    timestamp: new Date().toISOString(),
+  };
+
+  setCache(cacheKey, detail);
+  return detail;
 }

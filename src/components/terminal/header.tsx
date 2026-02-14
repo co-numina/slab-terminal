@@ -153,6 +153,11 @@ export function Header() {
             </button>
           )
         })}
+        {activeView === "slab" && (
+          <span className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--terminal-cyan)] border-b-2 border-[var(--terminal-cyan)]">
+            SLAB DETAIL
+          </span>
+        )}
         <span className="flex-1" />
         <span className="text-[9px] text-[var(--terminal-dim)] py-1.5">
           SLAB SCOPE

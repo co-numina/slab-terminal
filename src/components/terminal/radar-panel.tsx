@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRadarData, type ProgramRadar, type SlabRadar, type HealthStatus } from "@/hooks/use-radar-data"
+import { useNavigation } from "@/hooks/use-navigation"
 import { TerminalPanel } from "./terminal-panel"
 import { ExplorerLink, truncateAddress } from "./explorer-link"
 
@@ -67,17 +68,26 @@ function formatSlabSize(bytes: number): string {
 
 // ── Slab Row ────────────────────────────────────────────────────────────
 
-function SlabRow({ slab, network }: { slab: SlabRadar; network: "devnet" | "mainnet" }) {
+function SlabRow({ slab, network, programLabel }: { slab: SlabRadar; network: "devnet" | "mainnet"; programLabel: string }) {
   const color = healthColor(slab.health)
+  const { navigateToSlab } = useNavigation()
+
   return (
-    <div className="flex items-center justify-between py-0.5 px-2 text-[10px] hover:bg-[var(--terminal-hover)] transition-colors">
+    <div
+      className="flex items-center justify-between py-0.5 px-2 text-[10px] hover:bg-[var(--terminal-hover)] transition-colors cursor-pointer group"
+      onClick={() => navigateToSlab(slab.pubkey, programLabel, network)}
+      title={`Drill into ${slab.pubkey}`}
+    >
       <div className="flex items-center gap-2">
         <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: color }} />
         <span className="text-[var(--terminal-dim)]">{slab.label}</span>
-        <span className="text-[var(--terminal-cyan)] font-mono">
+        <span className="text-[var(--terminal-cyan)] font-mono group-hover:text-[var(--terminal-green)] transition-colors">
           {truncateAddress(slab.pubkey, 4)}
         </span>
         <ExplorerLink type="address" address={slab.pubkey} network={network} />
+        <span className="text-[9px] text-[var(--terminal-dim)] group-hover:text-[var(--terminal-amber)] transition-colors">
+          {"▶ DRILL"}
+        </span>
       </div>
       <div className="flex items-center gap-3">
         <span className="text-[var(--terminal-dim)]">{slab.numUsedAccounts} accts</span>
@@ -188,7 +198,7 @@ function ProgramCard({ program }: { program: ProgramRadar }) {
             {expanded && (
               <div className="flex flex-col mt-1">
                 {program.slabs.map((slab) => (
-                  <SlabRow key={slab.pubkey} slab={slab} network={program.network} />
+                  <SlabRow key={slab.pubkey} slab={slab} network={program.network} programLabel={program.label} />
                 ))}
               </div>
             )}
