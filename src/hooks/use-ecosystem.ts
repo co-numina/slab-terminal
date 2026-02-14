@@ -46,6 +46,7 @@ export interface EcosystemData {
     devnet: { programs: number; slabs: number; accounts: number }
     mainnet: { programs: number; slabs: number; accounts: number }
   }
+  solUsdPrice: number
   programSummaries: ProgramSummary[]
   lastScan: string
   scanDurationMs: number

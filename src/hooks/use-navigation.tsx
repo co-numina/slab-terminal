@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
 
-export type ViewId = "home" | "radar" | "slab"
+export type ViewId = "home" | "radar" | "slab" | "docs"
 
 interface NavigationContextType {
   activeView: ViewId

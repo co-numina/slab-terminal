@@ -19,6 +19,7 @@ import { batchFetchAccounts, batchFetchVaultBalances } from '@/lib/fetcher';
 import { parseConfig, parseAllAccounts } from '@/lib/percolator';
 import { resolveMintSymbolsBatch } from '@/lib/known-mints';
 import { getNetworkConnection } from '@/lib/connections';
+import { getEffectiveOraclePrice } from '@/lib/oracle';
 import { AccountKind } from '@/lib/types';
 
 const CACHE_KEY = 'ecosystem_response';
@@ -142,6 +143,7 @@ export async function GET() {
     let activeShorts = 0;
     let flatAccounts = 0;
     let parsedAccountCount = 0;
+    let solUsdPrice = 0;
 
     const uniqueOwners = new Set<string>();
     const SYSTEM_PROGRAM = '11111111111111111111111111111111';
@@ -181,6 +183,11 @@ export async function GET() {
             if (ownerStr !== SYSTEM_PROGRAM && ownerStr !== ZERO_ADDRESS && !ownerStr.startsWith('1111111')) {
               uniqueOwners.add(ownerStr);
             }
+          }
+
+          // Extract SOL/USD price from the first slab with a valid oracle price
+          if (solUsdPrice === 0 && config.lastEffectivePriceE6 > 0n) {
+            solUsdPrice = getEffectiveOraclePrice(config.lastEffectivePriceE6, config.invert);
           }
 
           rawTvlEntries.push({
@@ -254,6 +261,7 @@ export async function GET() {
         lastCrankAge: p.lastCrankAge,
         error: p.error,
       })),
+      solUsdPrice,
       lastScan: radar.scanTimestamp,
       scanDurationMs: radar.scanDurationMs,
     };

@@ -13,6 +13,7 @@ const ASCII_LOGO = `\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588
 const TABS: { id: ViewId; label: string }[] = [
   { id: "home", label: "HOME" },
   { id: "radar", label: "RADAR" },
+  { id: "docs", label: "DOCS" },
 ]
 
 export function Header() {
@@ -24,6 +25,7 @@ export function Header() {
   const totalAccounts = data?.accounts.total ?? 0
   const activePrograms = data?.programs.active ?? 0
   const hasMainnet = (data?.networks.mainnet.programs ?? 0) > 0
+  const solPrice = data?.solUsdPrice ?? 0
 
   return (
     <header className="border-b border-[var(--terminal-border)] bg-[var(--terminal-panel)]">
@@ -59,6 +61,13 @@ export function Header() {
 
         {/* Ecosystem Stats */}
         <div className="flex flex-wrap items-center gap-4 lg:gap-6">
+          {solPrice > 0 && (
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[10px] uppercase text-[var(--terminal-dim)]">SOL</span>
+              <span className="text-xs font-bold text-[var(--terminal-amber)]">${solPrice.toFixed(2)}</span>
+            </div>
+          )}
+
           <div className="flex items-baseline gap-1.5">
             <span className="text-[10px] uppercase text-[var(--terminal-dim)]">PROGRAMS</span>
             <span className="text-xs font-bold text-[var(--terminal-green)]">{totalPrograms}</span>
