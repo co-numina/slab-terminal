@@ -1,42 +1,153 @@
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: 0 0% 4%;
+    --foreground: 120 100% 56%;
+    --card: 210 33% 7%;
+    --card-foreground: 120 100% 56%;
+    --popover: 210 33% 7%;
+    --popover-foreground: 120 100% 56%;
+    --primary: 120 100% 56%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 210 14% 25%;
+    --secondary-foreground: 210 10% 40%;
+    --muted: 210 33% 7%;
+    --muted-foreground: 210 10% 40%;
+    --accent: 195 100% 50%;
+    --accent-foreground: 0 0% 4%;
+    --destructive: 344 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 33% 17%;
+    --input: 215 33% 17%;
+    --ring: 120 100% 56%;
+    --radius: 0rem;
+
+    --terminal-green: #00ff41;
+    --terminal-red: #ff0040;
+    --terminal-amber: #ffaa00;
+    --terminal-cyan: #00d4ff;
+    --terminal-dim: #5a6672;
+    --terminal-panel: #0d1117;
+    --terminal-bg: #0a0a0a;
+    --terminal-border: #1e293b;
+    --terminal-hover: #162032;
+    --terminal-row-alt: #0f1419;
   }
 }
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
+@layer base {
+  * {
+    @apply border-border;
   }
+  body {
+    background-color: var(--terminal-bg);
+    color: var(--terminal-green);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Scanline CRT overlay */
+.scanlines::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.015) 1px,
+    rgba(0, 0, 0, 0.015) 2px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Terminal green glow for hero price */
+.text-glow-green {
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.3), 0 0 20px rgba(0, 255, 65, 0.1);
+}
+
+/* Pulsing live dot with scale */
+@keyframes pulse-live {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+}
+.animate-pulse-live {
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+/* Flash animation for value changes */
+@keyframes flash-green {
+  0% { background-color: rgba(0, 255, 65, 0.15); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-red {
+  0% { background-color: rgba(255, 0, 64, 0.15); }
+  100% { background-color: transparent; }
+}
+.flash-green { animation: flash-green 0.6s ease-out; }
+.flash-red { animation: flash-red 0.6s ease-out; }
+
+/* Blinking for critical health */
+@keyframes blink-critical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+.animate-blink-critical {
+  animation: blink-critical 0.8s ease-in-out infinite;
+}
+
+/* Blinking cursor for loading */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-blink-cursor {
+  animation: blink-cursor 1s step-end infinite;
+}
+
+/* Activity feed entry slide */
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Activity feed bottom fade mask */
+.feed-fade-mask {
+  mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--terminal-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--terminal-border);
+  border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-dim);
 }

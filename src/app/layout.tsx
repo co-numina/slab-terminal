@@ -1,32 +1,31 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+import type { Metadata, Viewport } from "next"
+import { JetBrains_Mono } from "next/font/google"
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+import "./globals.css"
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-});
+  variable: "--font-jetbrains-mono",
+})
 
 export const metadata: Metadata = {
-  title: "SLAB — Percolator Terminal",
-  description: "Live devnet dashboard for Anatoly's Percolator perpetuals protocol on Solana",
-};
+  title: "SLAB \u2014 Percolator Terminal",
+  description:
+    "Live terminal dashboard for Percolator perpetual futures on Solana Devnet",
+}
+
+export const viewport: Viewport = {
+  themeColor: "#0a0a0a",
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        {children}
-      </body>
+    <html lang="en" className={jetbrainsMono.variable}>
+      <body className="font-mono antialiased">{children}</body>
     </html>
-  );
+  )
 }
