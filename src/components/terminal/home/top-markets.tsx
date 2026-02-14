@@ -1,18 +1,26 @@
 "use client"
 
 import { useState } from "react"
-import { useTopMarkets, type TopMarket } from "@/hooks/use-top-markets"
+import { useTopMarkets, type TopMarket, type OracleMode } from "@/hooks/use-top-markets"
 import { useNavigation } from "@/hooks/use-navigation"
 import { TerminalPanel } from "../terminal-panel"
-import { truncateAddress } from "../explorer-link"
 
-type SortKey = "tvl" | "positions" | "health" | "oi"
+type SortKey = "tvl" | "positions" | "health" | "oi" | "insurance"
 
 function formatCompact(n: number): string {
   if (n === 0) return "0"
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toFixed(1)
+}
+
+function formatUsd(n: number): string {
+  if (n === 0) return "-"
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
+  if (n >= 1) return `$${n.toFixed(0)}`
+  if (n >= 0.01) return `$${n.toFixed(2)}`
+  return `$${n.toExponential(1)}`
 }
 
 function formatPrice(price: number): string {
@@ -38,22 +46,62 @@ function programShort(name: string): string {
   return name.slice(0, 8)
 }
 
+function oracleBadge(mode: OracleMode): { label: string; color: string } {
+  switch (mode) {
+    case "admin": return { label: "ADMIN", color: "var(--terminal-amber)" }
+    case "pyth": return { label: "PYTH", color: "var(--terminal-green)" }
+    case "dex-pumpswap": return { label: "PUMP", color: "var(--terminal-cyan)" }
+    case "dex-raydium": return { label: "RAY", color: "#7C3AED" }
+    case "dex-meteora": return { label: "MET", color: "#06B6D4" }
+    default: return { label: "?", color: "var(--terminal-dim)" }
+  }
+}
+
+function insuranceIndicator(health: "healthy" | "caution" | "warning"): { char: string; color: string } {
+  switch (health) {
+    case "healthy": return { char: "\u25CF", color: "var(--terminal-green)" }
+    case "caution": return { char: "\u25CF", color: "var(--terminal-amber)" }
+    case "warning": return { char: "\u25CF", color: "var(--terminal-red)" }
+  }
+}
+
 function sortMarkets(markets: TopMarket[], key: SortKey): TopMarket[] {
   const sorted = [...markets]
   switch (key) {
-    case "tvl": return sorted.sort((a, b) => b.tvl - a.tvl)
+    case "tvl": return sorted.sort((a, b) => {
+      const aVal = a.tvlUsd > 0 ? a.tvlUsd : a.tvl
+      const bVal = b.tvlUsd > 0 ? b.tvlUsd : b.tvl
+      return bVal - aVal
+    })
     case "positions": return sorted.sort((a, b) => b.positions.active - a.positions.active)
     case "health": return sorted.sort((a, b) => a.worstHealth - b.worstHealth)
-    case "oi": return sorted.sort((a, b) => b.openInterest - a.openInterest)
+    case "oi": return sorted.sort((a, b) => {
+      const aVal = a.openInterestUsd > 0 ? a.openInterestUsd : a.openInterest
+      const bVal = b.openInterestUsd > 0 ? b.openInterestUsd : b.openInterest
+      return bVal - aVal
+    })
+    case "insurance": return sorted.sort((a, b) => a.insurance.ratio - b.insurance.ratio)
   }
 }
 
 function MarketRow({ market, rank }: { market: TopMarket; rank: number }) {
   const { navigateToSlab } = useNavigation()
   const h = healthBar(market.worstHealth)
+  const oracle = oracleBadge(market.oracleMode)
+  const ins = insuranceIndicator(market.insurance.health)
   const posStr = market.positions.active > 0
     ? `${market.positions.longs}L/${market.positions.shorts}S`
     : "-"
+
+  // Use USD values when available, fall back to raw token amounts
+  const tvlDisplay = market.tvlUsd > 0
+    ? formatUsd(market.tvlUsd)
+    : `${formatCompact(market.tvl)} ${market.collateralSymbol}`
+  const oiDisplay = market.openInterestUsd > 0
+    ? formatUsd(market.openInterestUsd)
+    : market.openInterest > 0
+      ? formatCompact(market.openInterest)
+      : "-"
 
   return (
     <tr
@@ -66,24 +114,38 @@ function MarketRow({ market, rank }: { market: TopMarket; rank: number }) {
           <span className="text-[var(--terminal-cyan)] font-mono group-hover:text-[var(--terminal-green)] transition-colors">
             {market.collateralSymbol}/{market.config.invert ? "USD" : "USD"}
           </span>
+          <span
+            className="text-[7px] font-mono px-0.5 border"
+            style={{ color: oracle.color, borderColor: oracle.color }}
+            title={`Oracle: ${market.oracleMode}`}
+          >
+            {oracle.label}
+          </span>
           {market.network === "mainnet" && (
-            <span className="text-[8px] text-[var(--terminal-amber)]" title="Mainnet - real value">{"⚠"}</span>
+            <span className="text-[8px] text-[var(--terminal-amber)]" title="Mainnet - real value">{"\u26A0"}</span>
           )}
         </div>
       </td>
       <td className="py-0.5 pr-1.5 text-[9px]">
         <span className="text-[var(--terminal-dim)]">{programShort(market.program)}</span>
       </td>
-      <td className="py-0.5 pr-1.5 text-right font-mono">{formatPrice(market.price)}</td>
+      <td className="py-0.5 pr-1.5 text-right font-mono">
+        {market.priceUsd > 0 ? formatPrice(market.priceUsd) : formatPrice(market.price)}
+      </td>
       <td className="py-0.5 pr-1.5 text-right font-mono text-[var(--terminal-green)]">
-        {formatCompact(market.tvl)} {market.collateralSymbol}
+        {tvlDisplay}
       </td>
       <td className="py-0.5 pr-1.5 text-right font-mono text-[var(--terminal-dim)]">
-        {market.openInterest > 0 ? formatCompact(market.openInterest) : "-"}
+        {oiDisplay}
       </td>
       <td className="py-0.5 pr-1.5 text-right">
         <span className={market.positions.active > 0 ? "" : "text-[var(--terminal-dim)]"}>
           {posStr}
+        </span>
+      </td>
+      <td className="py-0.5 pr-1.5 text-right">
+        <span style={{ color: ins.color }} title={`Insurance: ${(market.insurance.ratio * 100).toFixed(1)}% ratio`}>
+          {ins.char}
         </span>
       </td>
       <td className="py-0.5 text-right">
@@ -126,7 +188,7 @@ export function TopMarkets() {
       {/* Sort bar */}
       <div className="flex items-center gap-1.5 pb-1 border-b border-[var(--terminal-border)] text-[8px]">
         <span className="text-[var(--terminal-dim)]">SORT:</span>
-        {(["tvl", "positions", "health", "oi"] as SortKey[]).map((key) => (
+        {(["tvl", "positions", "health", "oi", "insurance"] as SortKey[]).map((key) => (
           <button
             key={key}
             onClick={() => setSortKey(key)}
@@ -136,7 +198,7 @@ export function TopMarkets() {
                 : "border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:text-[var(--terminal-green)]"
             }`}
           >
-            {key === "oi" ? "OI" : key === "positions" ? "POS" : key.toUpperCase()}
+            {key === "oi" ? "OI" : key === "positions" ? "POS" : key === "insurance" ? "INS" : key.toUpperCase()}
           </button>
         ))}
       </div>
@@ -153,6 +215,7 @@ export function TopMarkets() {
               <th className="pb-0.5 pr-1.5 text-right">TVL</th>
               <th className="pb-0.5 pr-1.5 text-right">OI</th>
               <th className="pb-0.5 pr-1.5 text-right">POS</th>
+              <th className="pb-0.5 pr-1.5 text-right">INS</th>
               <th className="pb-0.5 text-right">HEALTH</th>
             </tr>
           </thead>
@@ -166,7 +229,7 @@ export function TopMarkets() {
 
       <div className="mt-1 flex items-center justify-between text-[8px]">
         <span className="text-[var(--terminal-dim)]">
-          Showing {data.count} of {data.totalCandidates}
+          Showing {data.count} of {data.totalCandidates} | Prices via DexScreener
         </span>
         <button
           onClick={() => setActiveView("radar")}

@@ -2,6 +2,8 @@ import useSWR from "swr"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+export type OracleMode = "admin" | "pyth" | "dex-pumpswap" | "dex-raydium" | "dex-meteora" | "unknown"
+
 export interface TopMarket {
   slabAddress: string
   program: string
@@ -10,9 +12,11 @@ export interface TopMarket {
   collateralMint: string
   collateralSymbol: string
   price: number
+  priceUsd: number
   tvl: number
   tvlUsd: number
   openInterest: number
+  openInterestUsd: number
   positions: {
     longs: number
     shorts: number
@@ -25,6 +29,15 @@ export interface TopMarket {
   fundingDirection: string
   lastCrankAge: number
   status: string
+  oracleMode: OracleMode
+  insurance: {
+    balance: number
+    feeRevenue: number
+    ratio: number
+    health: "healthy" | "caution" | "warning"
+  }
+  lifetimeLiquidations: number
+  lifetimeForceCloses: number
   config: {
     invert: number
     maintMarginBps: number

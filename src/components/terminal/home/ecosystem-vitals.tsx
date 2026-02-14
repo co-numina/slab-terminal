@@ -36,6 +36,14 @@ function formatCompact(n: number): string {
   return n.toFixed(3)
 }
 
+function formatUsd(n: number): string {
+  if (n === 0) return "$0"
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
+  if (n >= 1) return `$${n.toFixed(0)}`
+  return `$${n.toFixed(2)}`
+}
+
 function SectionLabel({ label }: { label: string }) {
   return (
     <div className="text-[9px] font-bold text-[var(--terminal-cyan)] tracking-wider uppercase">
@@ -49,37 +57,50 @@ function SectionLabel({ label }: { label: string }) {
 interface TVLSegment {
   label: string
   tvl: number
+  tvlUsd: number
   network: "devnet" | "mainnet"
   color: string
 }
 
 function buildTVLSegments(markets: TopMarket[]): TVLSegment[] {
-  const byProgram = new Map<string, { tvl: number; label: string; network: "devnet" | "mainnet" }>()
+  const byProgram = new Map<string, { tvl: number; tvlUsd: number; label: string; network: "devnet" | "mainnet" }>()
   for (const m of markets) {
     const existing = byProgram.get(m.program)
-    if (existing) existing.tvl += m.tvl
-    else byProgram.set(m.program, { tvl: m.tvl, label: m.program, network: m.network })
+    if (existing) {
+      existing.tvl += m.tvl
+      existing.tvlUsd += m.tvlUsd
+    } else {
+      byProgram.set(m.program, { tvl: m.tvl, tvlUsd: m.tvlUsd, label: m.program, network: m.network })
+    }
   }
 
   const segments: TVLSegment[] = []
   for (const [, v] of byProgram) {
-    if (v.tvl <= 0) continue
+    if (v.tvl <= 0 && v.tvlUsd <= 0) continue
     segments.push({
       label: programShort(v.label),
       tvl: v.tvl,
+      tvlUsd: v.tvlUsd,
       network: v.network,
       color: programColor(v.label, v.network),
     })
   }
-  segments.sort((a, b) => b.tvl - a.tvl)
+  // Sort by USD TVL when available, otherwise raw
+  segments.sort((a, b) => {
+    const aVal = a.tvlUsd > 0 ? a.tvlUsd : a.tvl
+    const bVal = b.tvlUsd > 0 ? b.tvlUsd : b.tvl
+    return bVal - aVal
+  })
   return segments
 }
 
 function TVLSection({ markets }: { markets: TopMarket[] }) {
   const segments = buildTVLSegments(markets)
   const totalTVL = segments.reduce((s, seg) => s + seg.tvl, 0)
+  const totalTVLUsd = segments.reduce((s, seg) => s + seg.tvlUsd, 0)
+  const useUsd = totalTVLUsd > 0
 
-  if (totalTVL === 0) {
+  if (totalTVL === 0 && totalTVLUsd === 0) {
     return (
       <div className="flex flex-col gap-0.5">
         <SectionLabel label="TVL Distribution" />
@@ -90,11 +111,15 @@ function TVLSection({ markets }: { markets: TopMarket[] }) {
     )
   }
 
+  // Compute total for proportional sizing
+  const total = useUsd ? totalTVLUsd : totalTVL
+
   // Compute char widths
   const charWidths: { chars: number; seg: TVLSegment }[] = []
   let usedChars = 0
   for (let i = 0; i < segments.length; i++) {
-    const pct = segments[i].tvl / totalTVL
+    const segVal = useUsd ? segments[i].tvlUsd : segments[i].tvl
+    const pct = segVal / total
     const chars = i === segments.length - 1
       ? BAR_CHARS - usedChars
       : Math.max(1, Math.round(pct * BAR_CHARS))
@@ -104,7 +129,14 @@ function TVLSection({ markets }: { markets: TopMarket[] }) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <SectionLabel label="TVL Distribution" />
+      <div className="flex items-center justify-between">
+        <SectionLabel label="TVL Distribution" />
+        {useUsd && (
+          <span className="text-[8px] text-[var(--terminal-dim)]">
+            Total: {formatUsd(totalTVLUsd)}
+          </span>
+        )}
+      </div>
       {/* Bar */}
       <div className="font-mono text-[11px] leading-none whitespace-nowrap overflow-hidden">
         {charWidths.map(({ chars, seg }, i) => (
@@ -114,8 +146,10 @@ function TVLSection({ markets }: { markets: TopMarket[] }) {
       {/* Annotation line */}
       <div className="font-mono text-[9px] leading-none whitespace-nowrap overflow-hidden flex">
         {charWidths.filter(cw => cw.chars >= 2).map(({ chars, seg }, i) => {
-          const pct = ((seg.tvl / totalTVL) * 100).toFixed(0)
-          const labelText = `${seg.label} (${pct}%)`
+          const segVal = useUsd ? seg.tvlUsd : seg.tvl
+          const pct = ((segVal / total) * 100).toFixed(0)
+          const valStr = useUsd ? formatUsd(seg.tvlUsd) : `${formatCompact(seg.tvl)}`
+          const labelText = `${seg.label} ${valStr} (${pct}%)`
           return (
             <span
               key={i}
@@ -207,37 +241,77 @@ function BalanceSection({ data }: { data: EcosystemData }) {
 interface InsuranceEntry {
   label: string
   network: "devnet" | "mainnet"
+  balance: number
+  balanceUsd: number
+  oiUsd: number
   ratio: number
-  isAdminBurned: boolean
-  note: string
+  health: "healthy" | "caution" | "warning"
+  feeRevenue: number
+  markets: number
   color: string
 }
 
 function buildInsuranceEntries(markets: TopMarket[]): InsuranceEntry[] {
-  const byProgram = new Map<string, { tvl: number; label: string; network: "devnet" | "mainnet"; markets: number }>()
+  const byProgram = new Map<string, {
+    label: string
+    network: "devnet" | "mainnet"
+    balance: number
+    balanceUsd: number
+    oiUsd: number
+    feeRevenue: number
+    totalOI: number
+    markets: number
+    worstHealth: "healthy" | "caution" | "warning"
+  }>()
+
   for (const m of markets) {
     const existing = byProgram.get(m.program)
-    if (existing) { existing.tvl += m.tvl; existing.markets++ }
-    else byProgram.set(m.program, { tvl: m.tvl, label: m.program, network: m.network, markets: 1 })
+    if (existing) {
+      existing.balance += m.insurance.balance
+      existing.balanceUsd += m.insurance.balance * (m.priceUsd > 0 ? m.priceUsd : 0)
+      existing.oiUsd += m.openInterestUsd
+      existing.feeRevenue += m.insurance.feeRevenue
+      existing.totalOI += m.openInterest
+      existing.markets++
+      // Track worst insurance health across all markets
+      const healthOrder = { warning: 0, caution: 1, healthy: 2 }
+      if (healthOrder[m.insurance.health] < healthOrder[existing.worstHealth]) {
+        existing.worstHealth = m.insurance.health
+      }
+    } else {
+      byProgram.set(m.program, {
+        label: m.program,
+        network: m.network,
+        balance: m.insurance.balance,
+        balanceUsd: m.insurance.balance * (m.priceUsd > 0 ? m.priceUsd : 0),
+        oiUsd: m.openInterestUsd,
+        feeRevenue: m.insurance.feeRevenue,
+        totalOI: m.openInterest,
+        markets: 1,
+        worstHealth: m.insurance.health,
+      })
+    }
   }
 
   const entries: InsuranceEntry[] = []
   for (const [, d] of byProgram) {
-    if (d.tvl <= 0) continue
-    const isSOV = d.label.toLowerCase().includes("sov")
-    const isToly = d.label.toLowerCase().includes("toly")
-    const ratio = isSOV ? 12 : isToly ? 9 : d.markets > 10 ? 6 : 2
-    const color = ratio >= 10 ? "var(--terminal-green)" : ratio >= 5 ? "var(--terminal-amber)" : "var(--terminal-red)"
-
-    let note = `${formatCompact(d.tvl)} TVL across ${d.markets} markets`
-    if (isSOV) note = "accruing \u00B7 admin burned"
+    const ratio = d.totalOI > 0 ? d.balance / d.totalOI : 0
+    const color = d.worstHealth === "healthy"
+      ? "var(--terminal-green)"
+      : d.worstHealth === "caution"
+        ? "var(--terminal-amber)"
+        : "var(--terminal-red)"
 
     entries.push({
       label: programShort(d.label),
       network: d.network,
+      balance: d.balance,
+      balanceUsd: d.balanceUsd,
+      oiUsd: d.oiUsd,
       ratio,
-      isAdminBurned: isSOV,
-      note,
+      health: d.worstHealth,
+      feeRevenue: d.feeRevenue,
+      markets: d.markets,
       color,
     })
   }
@@ -250,18 +324,33 @@ const INS_BAR_CHARS = 30
 
 function InsuranceSection({ markets }: { markets: TopMarket[] }) {
   const entries = buildInsuranceEntries(markets)
-  const hasSOV = entries.some(e => e.isAdminBurned)
+
+  // Calculate ecosystem-wide totals
+  const totalInsurance = markets.reduce((s, m) => s + m.insurance.balance, 0)
+  const totalOI = markets.reduce((s, m) => s + m.openInterest, 0)
+  const totalLiqs = markets.reduce((s, m) => s + m.lifetimeLiquidations, 0)
+  const totalFC = markets.reduce((s, m) => s + m.lifetimeForceCloses, 0)
 
   return (
     <div className="flex flex-col gap-0.5">
-      <SectionLabel label="Insurance Reserves" />
+      <div className="flex items-center justify-between">
+        <SectionLabel label="Insurance Reserves" />
+        <span className="text-[8px] text-[var(--terminal-dim)]">
+          {totalLiqs > 0 ? `${totalLiqs} liqs / ${totalFC} force-closes` : ""}
+        </span>
+      </div>
       {entries.length > 0 ? (
         <div className="flex flex-col gap-1">
           {entries.map((entry, i) => {
-            const maxRatio = 20
+            const maxRatio = 0.20 // 20% is max for the bar
             const fillChars = Math.max(0, Math.min(INS_BAR_CHARS, Math.round((entry.ratio / maxRatio) * INS_BAR_CHARS)))
             const emptyChars = INS_BAR_CHARS - fillChars
             const isMainnet = entry.network === "mainnet"
+            const ratioPct = (entry.ratio * 100).toFixed(1)
+
+            const note = entry.balanceUsd > 0
+              ? `${formatUsd(entry.balanceUsd)} ins / ${formatUsd(entry.oiUsd)} OI (${ratioPct}%)`
+              : `${formatCompact(entry.balance)} ins / ${formatCompact(totalOI)} OI (${ratioPct}%)`
 
             return (
               <div key={i} className="flex items-center gap-2">
@@ -275,7 +364,7 @@ function InsuranceSection({ markets }: { markets: TopMarket[] }) {
                   <span style={{ color: "var(--terminal-border)" }}>{"\u2591".repeat(emptyChars)}</span>
                 </span>
                 <span className="text-[8px] text-[var(--terminal-dim)] whitespace-nowrap">
-                  {entry.note}
+                  {note}
                 </span>
               </div>
             )
@@ -283,11 +372,6 @@ function InsuranceSection({ markets }: { markets: TopMarket[] }) {
         </div>
       ) : (
         <div className="text-[9px] text-[var(--terminal-dim)]">loading reserves...</div>
-      )}
-      {hasSOV && (
-        <div className="text-[8px] text-[var(--terminal-amber)] mt-0.5">
-          {"\u26A0"} SOV mainnet insurance locked forever (admin burned)
-        </div>
       )}
     </div>
   )

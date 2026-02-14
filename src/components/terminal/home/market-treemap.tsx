@@ -1,15 +1,22 @@
 "use client"
 
-import { useTopMarkets, type TopMarket } from "@/hooks/use-top-markets"
+import { useTopMarkets, type TopMarket, type OracleMode } from "@/hooks/use-top-markets"
 import { useNavigation } from "@/hooks/use-navigation"
 import { TerminalPanel } from "../terminal-panel"
-import { truncateAddress } from "../explorer-link"
 
 function formatCompact(n: number): string {
   if (n === 0) return "0"
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toFixed(1)
+}
+
+function formatUsd(n: number): string {
+  if (n === 0) return "-"
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`
+  if (n >= 1) return `$${n.toFixed(0)}`
+  return `$${n.toFixed(2)}`
 }
 
 function programShort(label: string): string {
@@ -30,11 +37,42 @@ function programBorderColor(label: string, network: string): string {
   return "var(--terminal-dim)"
 }
 
+function oracleTag(mode: OracleMode): { label: string; color: string } {
+  switch (mode) {
+    case "admin": return { label: "ADM", color: "var(--terminal-amber)" }
+    case "pyth": return { label: "PYT", color: "var(--terminal-green)" }
+    case "dex-pumpswap": return { label: "PMP", color: "var(--terminal-cyan)" }
+    case "dex-raydium": return { label: "RAY", color: "#7C3AED" }
+    case "dex-meteora": return { label: "MET", color: "#06B6D4" }
+    default: return { label: "?", color: "var(--terminal-dim)" }
+  }
+}
+
+function insuranceDot(health: "healthy" | "caution" | "warning"): { color: string } {
+  switch (health) {
+    case "healthy": return { color: "var(--terminal-green)" }
+    case "caution": return { color: "var(--terminal-amber)" }
+    case "warning": return { color: "var(--terminal-red)" }
+  }
+}
+
+/** Get effective TVL value for sorting/display (prefer USD) */
+function effectiveTvl(m: TopMarket): number {
+  return m.tvlUsd > 0 ? m.tvlUsd : m.tvl
+}
+
 function MarketBlock({ market, isHero }: { market: TopMarket; isHero: boolean }) {
   const { navigateToSlab } = useNavigation()
   const borderColor = programBorderColor(market.program, market.network)
   const isMainnet = market.network === "mainnet"
   const hasPositions = market.positions.active > 0
+  const oracle = oracleTag(market.oracleMode)
+  const ins = insuranceDot(market.insurance.health)
+
+  // Display TVL in USD when available
+  const tvlStr = market.tvlUsd > 0
+    ? formatUsd(market.tvlUsd)
+    : `${formatCompact(market.tvl)} ${market.collateralSymbol}`
 
   return (
     <div
@@ -49,16 +87,26 @@ function MarketBlock({ market, isHero }: { market: TopMarket; isHero: boolean })
         <span className="text-[10px] font-bold text-[var(--terminal-cyan)] group-hover:text-[var(--terminal-green)] transition-colors font-mono">
           {market.collateralSymbol}/{market.config.invert ? "USD" : "USD"}
         </span>
+        <span
+          className="text-[7px] font-mono px-0.5 border"
+          style={{ color: oracle.color, borderColor: oracle.color }}
+        >
+          {oracle.label}
+        </span>
+        <span style={{ color: ins.color }} className="text-[7px]">{"\u25CF"}</span>
         {isMainnet && <span className="text-[8px] text-[var(--terminal-amber)]">{"\u26A0"}</span>}
       </div>
       <div className="flex items-center gap-2 text-[8px]">
         <span className="text-[var(--terminal-dim)]">{programShort(market.program)}</span>
-        <span className="text-[var(--terminal-green)] font-mono">
-          {formatCompact(market.tvl)} {market.collateralSymbol}
-        </span>
+        <span className="text-[var(--terminal-green)] font-mono">{tvlStr}</span>
       </div>
       {isHero && (
         <>
+          {market.positions.active > 0 && (
+            <div className="text-[8px] text-[var(--terminal-dim)]">
+              {market.positions.longs}L / {market.positions.shorts}S active
+            </div>
+          )}
           {isMainnet && (
             <div className="text-[8px] text-[var(--terminal-amber)] font-bold">REAL VALUE</div>
           )}
@@ -82,10 +130,10 @@ export function MarketTreemap() {
     )
   }
 
-  // Filter to markets with TVL > 0, sort by TVL desc
+  // Filter to markets with TVL > 0, sort by effective TVL desc (USD when available)
   const activeMarkets = [...data.markets]
-    .filter(m => m.tvl > 0)
-    .sort((a, b) => b.tvl - a.tvl)
+    .filter(m => m.tvl > 0 || m.tvlUsd > 0)
+    .sort((a, b) => effectiveTvl(b) - effectiveTvl(a))
 
   // Count zero-TVL markets
   const zeroTvlCount = data.markets.length - activeMarkets.length
